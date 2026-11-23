@@ -1,0 +1,19 @@
+# EngBook — Docker Compose (works as a TrueNAS "Custom App" YAML too)
+services:
+  engbook:
+    image: ghcr.io/leonidis2013/engbook:latest
+    # or build from this repo instead of pulling:
+    # build: .
+    container_name: engbook
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    environment:
+      - TZ=America/Chicago
+      # Public address, needed for passkeys when the proxy doesn't send X-Forwarded-Host/Proto:
+      # - ENGBOOK_ORIGIN=https://engbook.example.com
+    volumes:
+      - engbook-data:/data
+
+volumes:
+  engbook-data:
