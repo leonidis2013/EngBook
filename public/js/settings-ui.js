@@ -17,6 +17,7 @@ const DEFAULTS = {
   activePreset: 0,
   recentColors: [],
   fingerDraw: null, // null = automatic (on for phones)
+  touchMode: 'nav',  // phones: 'nav' = one finger moves the page, 'draw' = one finger draws
   stripSide: 'right',
   units: 'in',
   theme: 'auto',
@@ -71,7 +72,7 @@ function prefsPanel(app) {
   return h('div', { class: 'stack' },
     h('h3', {}, 'Pencil and touch'),
     field('Finger drawing', seg(p.v.fingerDraw == null ? 'auto' : p.v.fingerDraw ? 'on' : 'off', { auto: 'Auto (phones)', on: 'On', off: 'Off' },
-      (v) => p.set('fingerDraw', v === 'auto' ? null : v === 'on')), 'With Apple Pencil, fingers always pan and zoom.'),
+      (v) => { p.set('fingerDraw', v === 'auto' ? null : v === 'on'); app.editor.buildStrip(); }), 'Adds a move / draw switch to the tool strip. With Apple Pencil, fingers always move and zoom.'),
     field('Tool strip side', seg(p.get('stripSide'), { left: 'Left', right: 'Right' }, (v) => { p.set('stripSide', v); app.editor.updateStrip(); }), 'Put it under your free hand.'),
     h('h3', {}, 'Handwriting cleanup'),
     h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.on, onchange: (e) => setClean({ on: e.target.checked }) }), 'Clean up handwriting as I write'),

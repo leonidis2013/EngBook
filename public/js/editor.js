@@ -24,6 +24,7 @@ export class Editor {
     this.touches = new Map(); this.ignored = new Set();
     this.pencilSeen = false; this.lastPenUp = 0;
     this.cur = null; this.erasing = null; this.group = null;
+    this.lastTap = null; this.inertia = null;
 
     this.base = h('canvas', { class: 'cv base' });
     this.live = h('canvas', { class: 'cv live' });
@@ -80,8 +81,9 @@ export class Editor {
     const W = this.W || 800, H = this.H || 600;
     const size = pageSize(this.style);
     if (size) {
-      const z = Math.max(MIN_Z, Math.min(MAX_Z, (W - 40) / size.w));
-      this.view = { z, ox: -(W / z - size.w) / 2, oy: -20 / z };
+      const m = W < 700 ? 12 : 40;
+      const z = Math.max(MIN_Z, Math.min(MAX_Z, (W - m) / size.w));
+      this.view = { z, ox: -(W / z - size.w) / 2, oy: -(m / 2) / z };
     } else {
       const z = 1.25;
       this.view = { z, ox: -W / 2 / z, oy: -H / 3 / z };
@@ -245,7 +247,7 @@ export class Editor {
       e.preventDefault();
       if (!this.meta) return;
       if (e.ctrlKey || e.metaKey) this.zoomAt(e.clientX, e.clientY, this.view.z * Math.exp(-e.deltaY * 0.01));
-      else { this.view.ox += e.deltaX / this.view.z; this.view.oy += e.deltaY / this.view.z; this.render(); }
+      else { this.view.ox += e.deltaX / this.view.z; this.view.oy += e.deltaY / this.view.z; this.clampView(); this.render(); }
       this.saveViewSoon();
     }, { passive: false });
     window.addEventListener('keydown', (e) => this.onKey(e));
@@ -269,14 +271,17 @@ export class Editor {
   isDrawingPointer(e) {
     if (e.pointerType === 'pen') return true;
     if (e.pointerType === 'mouse') return e.button === 0 && !this.spaceDown;
-    if (e.pointerType === 'touch') return this.prefs.get('fingerDraw') && !this.pencilSeen && this.touches.size === 0 && !this.cur;
+    if (e.pointerType === 'touch') return this.fingerDrawing() && this.touches.size === 0 && !this.cur;
     return false;
   }
+
+  fingerDrawing() { return this.prefs.get('fingerDraw') && !this.pencilSeen && this.prefs.get('touchMode') === 'draw'; }
 
   onDown(e) {
     if (!this.meta) return;
     this.closeWheel();
-    if (e.pointerType === 'pen') { this.pencilSeen = true; this.cancelTouchGesture(); }
+    this.stopInertia();
+    if (e.pointerType === 'pen') { const first = !this.pencilSeen; this.pencilSeen = true; this.cancelTouchGesture(); if (first && this.modeBtn) this.buildStrip(); }
 
     if (this.drawPointer == null && this.isDrawingPointer(e)) {
       this.live.setPointerCapture(e.pointerId);
@@ -318,6 +323,7 @@ export class Editor {
     const pts = [...this.touches.values()];
     const c = centroid(pts);
     this.pinch = { c, dist: pts.length > 1 ? spread(pts) : 0, view: { ...this.view }, n: pts.length };
+    this.lastMove = null; this.vel = null;
   }
 
   cancelTouchGesture() {
@@ -332,7 +338,7 @@ export class Editor {
     if (e.pointerType === 'pen' || e.pointerType === 'mouse') { this.lastPos = this.toPage(e); this.updateReadoutSoon(); }
     if (this.mousePan && e.pointerType === 'mouse') {
       this.view.ox -= (e.clientX - this.mousePan.x) / this.view.z; this.view.oy -= (e.clientY - this.mousePan.y) / this.view.z;
-      this.mousePan = { x: e.clientX, y: e.clientY }; this.render(); return;
+      this.mousePan = { x: e.clientX, y: e.clientY }; this.clampView(); this.render(); return;
     }
     const t = this.touches.get(e.pointerId);
     if (!t) return;
@@ -346,8 +352,51 @@ export class Editor {
     if (pts.length > 1 && this.pinch.dist > 10) z = Math.max(MIN_Z, Math.min(MAX_Z, v0.z * spread(pts) / this.pinch.dist));
     const r = this.live.getBoundingClientRect();
     const px = (this.pinch.c.x - r.left) / v0.z + v0.ox, py = (this.pinch.c.y - r.top) / v0.z + v0.oy;
+    const now = performance.now();
+    if (this.lastMove && pts.length === 1) {
+      const dt = Math.max(1, now - this.lastMove.t);
+      const vx = (c.x - this.lastMove.x) / dt, vy = (c.y - this.lastMove.y) / dt;
+      this.vel = { x: this.vel ? this.vel.x * 0.4 + vx * 0.6 : vx, y: this.vel ? this.vel.y * 0.4 + vy * 0.6 : vy };
+    }
+    this.lastMove = { x: c.x, y: c.y, t: now };
     this.view = { z, ox: px - (c.x - r.left) / z, oy: py - (c.y - r.top) / z };
+    this.clampView();
     this.render();
+  }
+
+  // Keep at least part of a bounded page on screen so it can't get lost.
+  clampView() {
+    const size = pageSize(this.style);
+    if (!size) return;
+    // Like a scroll view: edges stop near the screen edge; a page smaller than the screen stays centred.
+    const { z } = this.view, m = 24 / z, w = this.W / z, hh = this.H / z;
+    this.view.ox = size.w + 2 * m <= w ? -(w - size.w) / 2 : Math.min(size.w - w + m, Math.max(-m, this.view.ox));
+    this.view.oy = size.h + 2 * m <= hh ? -(hh - size.h) / 2 : Math.min(size.h - hh + m, Math.max(-m, this.view.oy));
+  }
+
+  startInertia() {
+    const v = this.vel; this.vel = null;
+    if (!v || Math.hypot(v.x, v.y) < 0.15 || performance.now() - (this.lastMove?.t || 0) > 80) return;
+    let vx = v.x * 16, vy = v.y * 16; // px per frame
+    const step = () => {
+      vx *= 0.93; vy *= 0.93;
+      if (Math.hypot(vx, vy) < 0.3) { this.inertia = null; this.saveViewSoon(); return; }
+      this.view.ox -= vx / this.view.z; this.view.oy -= vy / this.view.z;
+      this.clampView(); this.renderBase();
+      this.inertia = requestAnimationFrame(step);
+    };
+    this.inertia = requestAnimationFrame(step);
+  }
+
+  stopInertia() { if (this.inertia) { cancelAnimationFrame(this.inertia); this.inertia = null; } }
+
+  // Double-tap: zoom in to 2.5x at that spot, or back to fit.
+  doubleTapZoom(x, y) {
+    const size = pageSize(this.style);
+    const fitZ = size ? (this.W - (this.W < 700 ? 12 : 40)) / size.w : 1.25;
+    if (this.view.z > fitZ * 1.3) { this.fit(); return; }
+    this.zoomAt(x, y, Math.max(fitZ * 2.5, 1.5));
+    this.clampView(); this.saveViewSoon();
   }
 
   onUp(e, cancelled = false) {
@@ -365,9 +414,18 @@ export class Editor {
     clearTimeout(this.lpTimer);
     if (this.touches.size) { this.beginPinch(); return; }
     // all fingers lifted: was it a two- or three-finger tap?
-    const g = this.gesture; this.gesture = null; this.pinch = null;
+    const g = this.gesture; this.gesture = null; this.pinch = null; this.lastMove = null;
     this.saveViewSoon();
+    if (g && !g.consumed && g.moved && g.maxCount === 1) { this.startInertia(); return; }
+    this.vel = null;
     if (!g || g.consumed || g.moved || performance.now() - g.start > TAP_MS) return;
+    if (g.maxCount === 1) {
+      const t = performance.now();
+      if (this.lastTap && t - this.lastTap.t < 320 && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 40) {
+        this.lastTap = null; this.doubleTapZoom(e.clientX, e.clientY);
+      } else this.lastTap = { t, x: e.clientX, y: e.clientY };
+      return;
+    }
     if (g.maxCount === 2) this.undo();
     else if (g.maxCount === 3) this.redo();
   }
@@ -516,10 +574,11 @@ export class Editor {
     if (i < 0 || i >= presets.length) return;
     this.prefs.set('activePreset', i);
     this.eraserMode = false;
+    if (this.modeBtn) this.prefs.set('touchMode', 'draw');
     this.updateStrip();
   }
 
-  setEraser(on) { this.eraserMode = on; this.updateStrip(); }
+  setEraser(on) { this.eraserMode = on; if (on && this.modeBtn) this.prefs.set('touchMode', 'draw'); this.updateStrip(); }
 
   updatePreset(patch) {
     const presets = this.prefs.get('presets').map((p) => ({ ...p }));
@@ -548,7 +607,7 @@ export class Editor {
       if (!downAt) return;
       const short = performance.now() - downAt < 260; downAt = 0;
       this.quickEraser = false;
-      if (short) this.eraserMode = !this.eraserMode;
+      if (short) { this.eraserMode = !this.eraserMode; if (this.eraserMode && this.modeBtn) this.prefs.set('touchMode', 'draw'); }
       this.updateStrip();
     };
     eraser.addEventListener('pointerup', release);
@@ -558,6 +617,12 @@ export class Editor {
 
     this.colorBtn = h('button', { class: 'ts-btn ts-color', 'aria-label': 'Color', onclick: () => this.openColorPopover(this.colorBtn) }, h('span', { class: 'swatch big' }));
     this.widthBtn = h('button', { class: 'ts-btn ts-width mono', 'aria-label': 'Line weight', onclick: () => this.openWidthPopover(this.widthBtn) }, '');
+    this.modeBtn = null;
+    if (this.prefs.get('fingerDraw') && !this.pencilSeen) {
+      this.modeBtn = h('button', { class: 'ts-btn ts-mode', 'aria-label': 'Switch between moving and drawing',
+        onclick: () => { this.prefs.set('touchMode', this.prefs.get('touchMode') === 'draw' ? 'nav' : 'draw'); this.updateStrip(); flash(this.host, this.prefs.get('touchMode') === 'draw' ? 'Draw with finger' : 'Move and zoom'); } });
+      this.strip.append(this.modeBtn, h('div', { class: 'ts-sep' }));
+    }
     this.strip.append(...this.presetBtns, h('div', { class: 'ts-sep' }), eraser, h('div', { class: 'ts-sep' }), this.colorBtn, this.widthBtn,
       h('div', { class: 'ts-sep' }),
       h('button', { class: 'ts-btn', 'aria-label': 'Undo', onclick: () => this.undo() }, icon('undo')),
@@ -570,6 +635,12 @@ export class Editor {
     const active = this.prefs.get('activePreset');
     this.strip.classList.toggle('left', this.prefs.get('stripSide') === 'left');
     this.strip.style.display = this.meta ? '' : 'none';
+    if (this.modeBtn) {
+      const draw = this.prefs.get('touchMode') === 'draw';
+      this.modeBtn.replaceChildren(icon(draw ? 'fineliner' : 'hand'));
+      this.modeBtn.classList.toggle('on', true);
+      this.modeBtn.classList.toggle('nav', !draw);
+    }
     this.presetBtns?.forEach((b, i) => {
       const p = presets[i];
       b.classList.toggle('on', i === active && this.activeTool !== 'eraser');

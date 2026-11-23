@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-11-23
+
+### Added
+- Phone navigation: a move / draw switch on the tool strip. In move mode one finger scrolls the page; in draw mode one finger draws and two fingers move and zoom. Picking a pen or the eraser switches to draw mode.
+- Momentum scrolling after a one-finger swipe.
+- Double-tap to zoom in at that spot, double-tap again to fit the page.
+
+### Changed
+- Pages scroll like a normal scroll view: edges stop at the screen edge and a page smaller than the screen stays centered, so it can't get lost off-screen.
+- Pages fit the full width on phones; the coordinate readout is hidden on small screens.
+- Default host port in the compose file is now 8091.
+
 ## 0.1.0 — 2026-11-23
 
 First release: the core notebook.

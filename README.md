@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.1.0** · © 2026 Jerod Ulicki
+Version **0.1.1** · © 2026 Jerod Ulicki
 
 ---
 
@@ -100,7 +100,8 @@ Open the site in Safari → **Share** → **Add to Home Screen**. EngBook then o
 | Action | How |
 |---|---|
 | Write / draw | Apple Pencil (pressure and speed shape the line) |
-| Pan | One finger |
+| Pan | One finger (on a phone: in move mode) — with momentum |
+| Zoom to a spot / back to fit | Double-tap |
 | Zoom | Pinch with two fingers |
 | Undo / Redo | Two-finger tap / three-finger tap |
 | Tool wheel | Long-press with a finger anywhere on the page |
@@ -108,7 +109,7 @@ Open the site in Safari → **Share** → **Add to Home Screen**. EngBook then o
 | Eraser on/off | Tap the eraser button |
 | Laptop | Mouse draws, scroll pans, Ctrl/⌘ + scroll zooms, Ctrl/⌘+Z undo, Space + drag pans, keys 1–5 pick pens, E eraser, 0 fit page |
 
-Your palm is ignored while the Pencil is writing. Finger drawing is on automatically for phones, and you can change that in **Settings → Preferences**. The tool strip can sit on the left or right.
+Your palm is ignored while the Pencil is writing. On a phone, the first button on the tool strip switches between **move** (hand, one finger scrolls) and **draw** (pen, one finger draws, two fingers move and zoom). Picking a pen switches to draw. You can change this in **Settings → Preferences → Finger drawing**. The tool strip can sit on the left or right.
 
 Safari doesn't give web apps access to Pencil double-tap, squeeze, hover or haptics, so EngBook uses the finger controls above instead.
 

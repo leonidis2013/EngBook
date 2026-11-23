@@ -285,3 +285,9 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 }
 .ts-color .swatch { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--line-2); }
 .btn { white-space: nowrap; }
+
+.ts-mode.nav { background: rgba(245, 165, 36, 0.16); color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+@media (max-width: 640px) {
+  .ro-pos { display: none; }
+  .readout { bottom: 66px; padding: 4px 8px; }
+}
