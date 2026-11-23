@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0 — 2026-11-23
+
+### Added
+- **Shape snap:** draw a shape and hold the pencil still for half a second. Lines, arcs, polylines, triangles, rectangles (square or rotated), polygons, circles and ellipses become clean shapes. The original stroke is kept.
+- After a line snaps, keep moving the pencil to steer its end; a live label shows length and angle.
+- **Snapping:** to grid points (graph, dot, isometric, calc pad, lined rows), to 15° angle steps, and to ends, corners, midpoints and centers of other shapes. Snap button on the tool strip; options in Settings.
+- **Dimensions:** dimension tool on the tool strip. Tap a line (length), rectangle (width and height), polygon edge, circle (diameter), arc (radius) or ellipse, or drag between any two points. Arrowheads, extension lines and values in inches, millimeters or feet-inches.
+- **Drawing scale** per page (1:1 to 1:100, 2:1, 4:1, and 1", 1/2", 1/4", 1/8" = 1'-0"). Dimensions update when the scale or units change.
+- **Page numbers:** "3 / 12" at the bottom of each page (can be turned off), SHEET filled in automatically on title blocks, PAGE on calc pads, and page numbers in the library.
+- Dimensions are included in PDF, PNG and SVG exports.
+
+### Fixed
+- The grid no longer shows through the title block or calc pad header.
+- Calc pad header now fits the page width.
+- Ink stays on the paper: strokes can't start off the page and are clipped at its edge.
+- Pinch-to-zoom on a phone works while drawing with a finger.
+- The tool strip no longer shows on the Home screen.
+- "null" text no longer appears in the page style settings.
+
 ## 0.1.1 — 2026-11-23
 
 ### Added

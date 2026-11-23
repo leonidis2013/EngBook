@@ -5,13 +5,15 @@ import { h, uid, toast } from './util.js';
 import { icon } from './icons.js';
 import { TOOLS, PALETTE, LINE_WEIGHTS_MM, HIGHLIGHTER_MM, UNITS_PER_INCH, UNITS_PER_MM,
   drawStroke, drawLiveStroke, strokeBounds, hitStroke, renderOrder, displayColor } from './ink.js';
-import { drawBackground, canvasAdapter, pageSize, styleOf, TONE_COLORS } from './backgrounds.js';
+import { drawBackground, canvasAdapter, pageSize, styleOf, TONE_COLORS, gridAt } from './backgrounds.js';
+import { recognize, snapShape, shapePoints, snapTargets, snapPoint, snapAngle, shapeName, shapeDistance, nearestEdge } from './shapes.js';
+import { makeDim, drawDim, hitDim, dimValue, defaultOffset, formatLength } from './dims.js';
 import { smoothPoints, simplify, straightenGroup } from './cleanup.js';
 import { applyOpsToDoc } from './store.js';
 
 const WRITING_TOOLS = new Set(['fineliner', 'tech', 'pencil', 'redline']);
 const MIN_Z = 0.2, MAX_Z = 8;
-const TAP_MS = 280, TAP_MOVE = 14, LONG_PRESS_MS = 520;
+const TAP_MS = 280, TAP_MOVE = 14, LONG_PRESS_MS = 520, HOLD_MS = 480, HOLD_PX = 4;
 
 export class Editor {
   constructor(host, store, prefs) {
@@ -20,7 +22,8 @@ export class Editor {
     this.undoStack = []; this.redoStack = [];
     this.hiddenColors = new Set();
     this.showOriginal = false;
-    this.eraserMode = false; this.quickEraser = false;
+    this.eraserMode = false; this.quickEraser = false; this.dimMode = false;
+    this.pageInfo = {};
     this.touches = new Map(); this.ignored = new Set();
     this.pencilSeen = false; this.lastPenUp = 0;
     this.cur = null; this.erasing = null; this.group = null;
@@ -46,7 +49,8 @@ export class Editor {
   get preset() { return this.prefs.get('presets')[this.prefs.get('activePreset')] || this.prefs.get('presets')[0]; }
   get style() { return styleOf(this.meta?.style); }
   get tone() { return this.style.tone; }
-  get activeTool() { return this.eraserMode || this.quickEraser ? 'eraser' : this.preset.tool; }
+  get activeTool() { return this.eraserMode || this.quickEraser ? 'eraser' : this.dimMode ? 'dim' : this.preset.tool; }
+  get snap() { return this.prefs.get('snap'); }
 
   open(meta, doc) {
     this.finalizeGroup();
@@ -65,6 +69,7 @@ export class Editor {
     this.saveView();
     this.meta = null; this.doc = null;
     this.empty.style.display = '';
+    this.updateStrip();
     this.render();
   }
 
@@ -146,17 +151,24 @@ export class Editor {
     if (size) { ctx.beginPath(); ctx.rect(0, 0, size.w, size.h); ctx.clip(); }
     const vis = this.visibleRect();
     const g = canvasAdapter(ctx, tone, z, style.grid ?? 1);
-    drawBackground(g, style, vis, z);
+    drawBackground(g, style, vis, z, this.pageInfo);
     g.flush();
     for (const s of renderOrder(this.doc.strokes)) {
       if (this.hiddenColors.has(s.color)) continue;
       const b = strokeBounds(s);
       if (b.maxX < vis.x0 || b.minX > vis.x1 || b.maxY < vis.y0 || b.minY > vis.y1) continue;
-      drawStroke(ctx, s, { tone, showOriginal: this.showOriginal });
+      this.paint(ctx, s);
     }
     ctx.restore();
     this.updateReadout();
   }
+
+  paint(ctx, s) {
+    if (s.kind === 'dim') drawDim(ctx, s, { tone: this.tone, style: this.style, units: this.prefs.get('units'), bg: (TONE_COLORS[this.tone] || TONE_COLORS.paper).bg });
+    else drawStroke(ctx, s, { tone: this.tone, showOriginal: this.showOriginal });
+  }
+
+  setPageInfo(info) { this.pageInfo = info || {}; this.render(); }
 
   drawCropMarks(ctx, x, y, w, h) {
     ctx.save();
@@ -180,7 +192,7 @@ export class Editor {
     this.pageTransform(ctx);
     const size = pageSize(this.style);
     if (size) { ctx.beginPath(); ctx.rect(0, 0, size.w, size.h); ctx.clip(); }
-    drawStroke(ctx, s, { tone: this.tone });
+    this.paint(ctx, s);
     ctx.restore();
   }
 
@@ -189,9 +201,29 @@ export class Editor {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.live.width, this.live.height);
     if (!this.meta) return;
-    if (this.cur) {
+    const size = pageSize(this.style);
+    ctx.save();
+    this.pageTransform(ctx);
+    if (size) { ctx.beginPath(); ctx.rect(0, 0, size.w, size.h); ctx.clip(); } // ink stays on the paper
+    if (this.cur) drawLiveStroke(ctx, this.cur, this.tone, this.cur.shape ? null : this.predicted);
+    if (this.dimDraft?.dim) this.paint(ctx, this.dimDraft.dim);
+    ctx.restore();
+    if (this.snapMark) { // little target where a point snapped
+      const { x, y } = this.snapMark;
       this.pageTransform(ctx);
-      drawLiveStroke(ctx, this.cur, this.tone, this.predicted);
+      ctx.lineWidth = 1.5 / this.view.z; ctx.strokeStyle = '#22c3e6';
+      ctx.beginPath(); ctx.arc(x, y, 6 / this.view.z, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (this.liveLabel) {
+      const { x, y, text } = this.liveLabel;
+      const sx = (x - this.view.ox) * this.view.z, sy = (y - this.view.oy) * this.view.z;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.font = '600 12px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+      const w = ctx.measureText(text).width + 14;
+      const bx = Math.min(this.W - w - 6, Math.max(6, sx + 14)), by = Math.max(6, sy - 40);
+      ctx.fillStyle = 'rgba(13,15,18,0.88)'; ctx.strokeStyle = '#22c3e6'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(bx, by, w, 24, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#e6e9ee'; ctx.textAlign = 'left'; ctx.fillText(text, bx + 7, by + 16);
     }
     if (this.eraserCursor) {
       const { x, y, r } = this.eraserCursor;
@@ -287,6 +319,7 @@ export class Editor {
       this.live.setPointerCapture(e.pointerId);
       this.drawPointer = e.pointerId;
       this.drawType = e.pointerType;
+      this.drawFinger = e.pointerType === 'touch' ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
       this.startDraw(e);
       return;
     }
@@ -304,7 +337,15 @@ export class Editor {
     if (performance.now() - this.lastPenUp < 220) { this.ignored.add(e.pointerId); return; }
 
     // a second finger while finger-drawing turns the stroke into a pan/zoom
-    if (this.drawPointer != null && this.drawType === 'touch') { this.cur = null; this.drawPointer = null; this.renderLive(); }
+    if (this.drawPointer != null && this.drawType === 'touch') {
+      // keep the first finger as part of the pinch, so two fingers zoom
+      const f = this.drawFinger;
+      this.cur = null; this.drawPointer = null; this.erasing = null; this.dimDraft = null; this.clearHold(); this.liveLabel = null; this.renderLive();
+      if (f) {
+        this.touches.set(f.id, { x: f.x, y: f.y, sx: f.x, sy: f.y });
+        this.gesture = { start: performance.now(), maxCount: 1, moved: true };
+      }
+    }
 
     this.live.setPointerCapture(e.pointerId);
     this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
@@ -334,7 +375,7 @@ export class Editor {
 
   onMove(e) {
     if (!this.meta) return;
-    if (e.pointerId === this.drawPointer) { this.moveDraw(e); return; }
+    if (e.pointerId === this.drawPointer) { if (this.drawFinger) { this.drawFinger.x = e.clientX; this.drawFinger.y = e.clientY; } this.moveDraw(e); return; }
     if (e.pointerType === 'pen' || e.pointerType === 'mouse') { this.lastPos = this.toPage(e); this.updateReadoutSoon(); }
     if (this.mousePan && e.pointerType === 'mouse') {
       this.view.ox -= (e.clientX - this.mousePan.x) / this.view.z; this.view.oy -= (e.clientY - this.mousePan.y) / this.view.z;
@@ -431,7 +472,25 @@ export class Editor {
   }
 
   // ------------------------------------------------------------------ drawing
+  snapOpts(exceptId) {
+    const sn = this.snap, z = this.view.z;
+    return {
+      targets: sn.ends ? snapTargets(this.doc.strokes, exceptId) : null,
+      targetTol: 14 / z, gridTol: 12 / z,
+      grid: (x, y) => gridAt(this.style, x, y),
+      gridOn: sn.on && sn.grid, endsOn: sn.on && sn.ends, angleOn: sn.on && sn.angle,
+    };
+  }
+
+  inPage(p, pad = 0) {
+    const size = pageSize(this.style);
+    return !size || (p.x >= -pad && p.y >= -pad && p.x <= size.w + pad && p.y <= size.h + pad);
+  }
+
   startDraw(e) {
+    const p0 = this.toPage(e);
+    if (!this.inPage(p0, 2)) { this.drawPointer = null; return; } // strokes start on the paper
+    if (this.activeTool === 'dim') { this.startDim(p0); return; }
     if (this.activeTool === 'eraser') {
       this.erasing = { ids: [] };
       this.eraseAt(this.toPage(e));
@@ -445,6 +504,8 @@ export class Editor {
 
   addPoint(e) {
     const p = this.toPage(e);
+    const size = pageSize(this.style);
+    if (size) { p.x = Math.max(0, Math.min(size.w, p.x)); p.y = Math.max(0, Math.min(size.h, p.y)); }
     const pts = this.cur.pts;
     const last = pts[pts.length - 1];
     if (last && Math.hypot(p.x - last[0], p.y - last[1]) < 0.35 / Math.max(0.5, this.view.z)) return;
@@ -459,16 +520,164 @@ export class Editor {
       for (const ev of (evs.length ? evs : [e])) this.eraseAt(this.toPage(ev));
       return;
     }
+    if (this.dimDraft) { this.moveDim(this.toPage(e), e); return; }
     if (!this.cur) return;
+    if (this.cur.shape) { this.adjustShape(this.toPage(e)); return; }
     const evs = e.getCoalescedEvents?.() || [];
     for (const ev of (evs.length ? evs : [e])) this.addPoint(ev);
+    // hold the pencil still at the end of a stroke to snap it into a clean shape
+    if (this.snap.on) {
+      if (!this.holdAnchor || Math.hypot(e.clientX - this.holdAnchor.x, e.clientY - this.holdAnchor.y) > HOLD_PX) {
+        this.holdAnchor = { x: e.clientX, y: e.clientY };
+        clearTimeout(this.holdTimer);
+        this.holdTimer = setTimeout(() => this.snapCurrent(), HOLD_MS);
+      }
+    }
     const pred = e.getPredictedEvents?.() || [];
     this.predicted = pred.slice(0, 2).map((ev) => { const p = this.toPage(ev); return [p.x, p.y, ev.pressure || 0.5]; });
     this.renderLive();
   }
 
+  clearHold() { clearTimeout(this.holdTimer); this.holdAnchor = null; }
+
+  snapCurrent() {
+    const c = this.cur;
+    if (!c || c.shape || this.drawPointer == null) return;
+    const sh = recognize(c.pts);
+    if (!sh) return;
+    const snapped = snapShape(sh, this.snapOpts());
+    c.raw = c.pts.slice();
+    c.shape = snapped;
+    c.pts = shapePoints(snapped);
+    this.liveLabel = this.measureLabel(snapped);
+    navigator.vibrate?.(10);
+    flash(this.host, shapeName(snapped));
+    this.renderLive();
+  }
+
+  // after snapping a line or polyline, the pencil keeps steering the last point
+  adjustShape(p) {
+    const sh = this.cur.shape;
+    if (sh.type !== 'line' && !(sh.type === 'poly' && !sh.closed)) return;
+    const opts = this.snapOpts();
+    const anchor = sh.type === 'line' ? sh.a : sh.pts[sh.pts.length - 2];
+    let q = opts.angleOn ? snapAngle(anchor, [p.x, p.y]) : [p.x, p.y];
+    const sp = snapPoint(q, opts);
+    if (sp.kind) q = sp.p;
+    this.snapMark = sp.kind ? { x: q[0], y: q[1] } : null;
+    if (sh.type === 'line') sh.b = q; else sh.pts[sh.pts.length - 1] = q;
+    this.cur.pts = shapePoints(sh);
+    this.liveLabel = this.measureLabel(sh);
+    this.renderLive();
+  }
+
+  measureLabel(sh) {
+    const units = this.prefs.get('units'), st = this.style;
+    const L = (u) => formatLength(u, st, units);
+    if (sh.type === 'line') {
+      const dx = sh.b[0] - sh.a[0], dy = sh.b[1] - sh.a[1];
+      let ang = Math.round(-Math.atan2(dy, dx) * 180 / Math.PI); if (ang < 0) ang += 360;
+      return { x: sh.b[0], y: sh.b[1], text: `${L(Math.hypot(dx, dy))}  ${ang}°` };
+    }
+    if (sh.type === 'circle') return { x: sh.c[0] + sh.r, y: sh.c[1] - sh.r, text: `Ø${L(sh.r * 2)}` };
+    if (sh.type === 'arc') return { x: sh.c[0], y: sh.c[1], text: `R${L(sh.r)}  ${Math.round(Math.abs(sh.sweep) * 180 / Math.PI)}°` };
+    if (sh.type === 'ellipse') return { x: sh.c[0] + sh.rx, y: sh.c[1] - sh.ry, text: `${L(sh.rx * 2)} × ${L(sh.ry * 2)}` };
+    if (sh.type === 'poly' && sh.rect) {
+      const w = Math.hypot(sh.pts[1][0] - sh.pts[0][0], sh.pts[1][1] - sh.pts[0][1]), hh = Math.hypot(sh.pts[2][0] - sh.pts[1][0], sh.pts[2][1] - sh.pts[1][1]);
+      return { x: sh.pts[2][0], y: sh.pts[1][1], text: `${L(w)} × ${L(hh)}` };
+    }
+    if (sh.type === 'poly') { const last = sh.pts[sh.pts.length - 1]; const pr = sh.pts[sh.pts.length - 2]; return { x: last[0], y: last[1], text: L(Math.hypot(last[0] - pr[0], last[1] - pr[1])) }; }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- dimension tool
+  startDim(p) {
+    const opts = this.snapOpts();
+    opts.endsOn = true; // dimensions always lock onto shape points
+    const sp = snapPoint([p.x, p.y], opts);
+    this.dimDraft = { start: sp.p, down: { x: p.x, y: p.y }, moved: false, dim: null };
+    this.snapMark = sp.kind ? { x: sp.p[0], y: sp.p[1] } : null;
+    this.renderLive();
+  }
+
+  moveDim(p) {
+    const d = this.dimDraft;
+    if (!d.moved && Math.hypot(p.x - d.down.x, p.y - d.down.y) * this.view.z < 10) return;
+    d.moved = true;
+    const opts = this.snapOpts(); opts.endsOn = true;
+    let q = opts.angleOn ? snapAngle(d.start, [p.x, p.y], 4) : [p.x, p.y];
+    const sp = snapPoint(q, opts);
+    if (sp.kind) q = sp.p;
+    this.snapMark = sp.kind ? { x: q[0], y: q[1] } : null;
+    d.dim = makeDim('draft', 'linear', d.start, q, defaultOffset(d.start, q), this.preset.color === '#f59e0b' ? '#111111' : this.preset.color);
+    this.liveLabel = { x: q[0], y: q[1], text: dimValue(d.dim, this.style, this.prefs.get('units')) };
+    this.renderLive();
+  }
+
+  endDim() {
+    const d = this.dimDraft; this.dimDraft = null; this.snapMark = null; this.liveLabel = null;
+    const color = this.preset.tool === 'highlighter' ? '#111111' : this.preset.color;
+    let dims = [];
+    if (d.moved && d.dim) {
+      if (Math.hypot(d.dim.b[0] - d.dim.a[0], d.dim.b[1] - d.dim.a[1]) > 3) dims = [makeDim(uid(), 'linear', d.dim.a, d.dim.b, d.dim.off, color)];
+    } else {
+      dims = this.dimsForTap(d.down, color);
+      if (!dims.length) toast('Tap a snapped shape, or drag between two points to dimension.');
+    }
+    this.renderLive();
+    if (!dims.length) return;
+    this.store.pageOps(this.doc.id, dims.map((x) => ({ op: 'add', stroke: x })));
+    this.pushHistory({ undo: dims.map((x) => ({ op: 'del', id: x.id })), redo: dims.map((x) => ({ op: 'undel', id: x.id })) });
+    this.render();
+  }
+
+  dimsForTap(p, color) {
+    const tol = 14 / this.view.z;
+    let best = null, bd = tol;
+    for (const s of this.doc.strokes) {
+      if (!s.shape || this.hiddenColors.has(s.color)) continue;
+      const dd = shapeDistance(s.shape, [p.x, p.y]);
+      if (dd < bd) { bd = dd; best = s; }
+    }
+    if (!best) return [];
+    const sh = best.shape;
+    const D = (type, a, b, off) => makeDim(uid(), type, a, b, off, color);
+    if (sh.type === 'line') return [D('linear', sh.a, sh.b, defaultOffset(sh.a, sh.b))];
+    if (sh.type === 'circle') {
+      const u = [Math.SQRT1_2, -Math.SQRT1_2];
+      return [D('diameter', [sh.c[0] + u[0] * sh.r, sh.c[1] + u[1] * sh.r], [sh.c[0] - u[0] * sh.r, sh.c[1] - u[1] * sh.r], 0)];
+    }
+    if (sh.type === 'arc') {
+      const t = sh.a0 + sh.sweep / 2;
+      return [D('radius', sh.c, [sh.c[0] + sh.r * Math.cos(t), sh.c[1] + sh.r * Math.sin(t)], 0)];
+    }
+    if (sh.type === 'ellipse') {
+      const { c, rx, ry } = sh;
+      return [D('linear', [c[0] - rx, c[1] - ry], [c[0] + rx, c[1] - ry], defaultOffset([0, 0], [1, 0])), D('linear', [c[0] + rx, c[1] - ry], [c[0] + rx, c[1] + ry], defaultOffset([0, 0], [0, 1], [1, 0]))];
+    }
+    if (sh.type === 'poly') {
+      const pts = sh.pts, n = pts.length;
+      const cx = pts.reduce((a, q) => a + q[0], 0) / n, cy = pts.reduce((a, q) => a + q[1], 0) / n;
+      const edgeDim = (i) => {
+        const a = pts[i], b = pts[(i + 1) % n], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        return D('linear', a, b, defaultOffset(a, b, sh.closed ? [mid[0] - cx, mid[1] - cy] : null));
+      };
+      if (sh.rect) {
+        // width along the top edge, height along the right edge
+        const edges = [0, 1, 2, 3].map((i) => ({ i, mid: [(pts[i][0] + pts[(i + 1) % 4][0]) / 2, (pts[i][1] + pts[(i + 1) % 4][1]) / 2] }));
+        const top = edges.reduce((m, e) => (e.mid[1] < m.mid[1] ? e : m));
+        const right = edges.reduce((m, e) => (e.mid[0] > m.mid[0] ? e : m));
+        return [edgeDim(top.i), edgeDim(right.i)];
+      }
+      return [edgeDim(nearestEdge(sh, [p.x, p.y]))];
+    }
+    return [];
+  }
+
   endDraw() {
     this.predicted = null;
+    this.clearHold();
+    if (this.dimDraft) { this.endDim(); return; }
     if (this.erasing) {
       const ids = this.erasing.ids; this.erasing = null; this.eraserCursor = null; this.renderLive();
       if (ids.length) {
@@ -480,8 +689,9 @@ export class Editor {
     const s = this.cur; this.cur = null;
     if (!s || !s.pts.length) { this.renderLive(); return; }
     delete s.t0;
+    this.liveLabel = null; this.snapMark = null;
     const cleanup = this.prefs.get('cleanup');
-    if (cleanup.on && s.tool !== 'highlighter' && s.pts.length > 3) {
+    if (!s.shape && cleanup.on && s.tool !== 'highlighter' && s.pts.length > 3) {
       const smoothed = smoothPoints(simplify(s.pts, 0.45), cleanup.smooth);
       if (smoothed !== s.pts) { s.raw = s.pts; s.pts = smoothed; }
     }
@@ -490,7 +700,7 @@ export class Editor {
     this.pushHistory({ undo: [{ op: 'del', id: s.id }], redo: [{ op: 'undel', id: s.id }] });
     this.drawCommitted(s);
     this.renderLive();
-    if (cleanup.on && cleanup.straighten && WRITING_TOOLS.has(s.tool)) this.trackWord(s);
+    if (!s.shape && cleanup.on && cleanup.straighten && WRITING_TOOLS.has(s.tool)) this.trackWord(s);
   }
 
   eraseAt(p) {
@@ -499,7 +709,7 @@ export class Editor {
     const hits = [];
     for (const s of this.doc.strokes) {
       if (this.hiddenColors.has(s.color)) continue;
-      if (hitStroke(s, p.x, p.y, r)) hits.push(s.id);
+      if (s.kind === 'dim' ? hitDim(s, p.x, p.y, r) : hitStroke(s, p.x, p.y, r)) hits.push(s.id);
     }
     if (hits.length) {
       applyOpsToDoc(this.doc, hits.map((id) => ({ op: 'del', id })));
@@ -527,7 +737,7 @@ export class Editor {
     clearTimeout(this.groupTimer);
     const g = this.group; this.group = null;
     if (!g || !this.doc || this.cur) return;
-    const strokes = g.ids.map((id) => this.doc.byId.get(id)).filter(Boolean);
+    const strokes = g.ids.map((id) => this.doc.byId.get(id)).filter((x) => x && !x.shape);
     if (!strokes.length) return;
     const fixed = straightenGroup(strokes, 1);
     if (!fixed) return;
@@ -573,12 +783,12 @@ export class Editor {
     const presets = this.prefs.get('presets');
     if (i < 0 || i >= presets.length) return;
     this.prefs.set('activePreset', i);
-    this.eraserMode = false;
+    this.eraserMode = false; this.dimMode = false;
     if (this.modeBtn) this.prefs.set('touchMode', 'draw');
     this.updateStrip();
   }
 
-  setEraser(on) { this.eraserMode = on; if (on && this.modeBtn) this.prefs.set('touchMode', 'draw'); this.updateStrip(); }
+  setEraser(on) { this.eraserMode = on; if (on) this.dimMode = false; if (on && this.modeBtn) this.prefs.set('touchMode', 'draw'); this.updateStrip(); }
 
   updatePreset(patch) {
     const presets = this.prefs.get('presets').map((p) => ({ ...p }));
@@ -607,7 +817,7 @@ export class Editor {
       if (!downAt) return;
       const short = performance.now() - downAt < 260; downAt = 0;
       this.quickEraser = false;
-      if (short) { this.eraserMode = !this.eraserMode; if (this.eraserMode && this.modeBtn) this.prefs.set('touchMode', 'draw'); }
+      if (short) { this.eraserMode = !this.eraserMode; if (this.eraserMode) this.dimMode = false; if (this.eraserMode && this.modeBtn) this.prefs.set('touchMode', 'draw'); }
       this.updateStrip();
     };
     eraser.addEventListener('pointerup', release);
@@ -615,6 +825,8 @@ export class Editor {
     eraser.addEventListener('pointerleave', () => { if (downAt && performance.now() - downAt > 260) release(); });
     this.eraserBtn = eraser;
 
+    this.dimBtn = h('button', { class: 'ts-btn', 'aria-label': 'Dimension tool', onclick: () => { this.dimMode = !this.dimMode; if (this.dimMode) { this.eraserMode = false; if (this.modeBtn) this.prefs.set('touchMode', 'draw'); } this.updateStrip(); flash(this.host, this.dimMode ? 'Dimension: tap a shape or drag' : 'Dimension off'); } }, icon('dim'));
+    this.snapBtn = h('button', { class: 'ts-btn', 'aria-label': 'Snap on/off', onclick: () => { const sn = { ...this.snap, on: !this.snap.on }; this.prefs.set('snap', sn); this.updateStrip(); flash(this.host, sn.on ? 'Snap on: hold the pencil to snap a shape' : 'Snap off'); } }, icon('magnet'));
     this.colorBtn = h('button', { class: 'ts-btn ts-color', 'aria-label': 'Color', onclick: () => this.openColorPopover(this.colorBtn) }, h('span', { class: 'swatch big' }));
     this.widthBtn = h('button', { class: 'ts-btn ts-width mono', 'aria-label': 'Line weight', onclick: () => this.openWidthPopover(this.widthBtn) }, '');
     this.modeBtn = null;
@@ -623,7 +835,7 @@ export class Editor {
         onclick: () => { this.prefs.set('touchMode', this.prefs.get('touchMode') === 'draw' ? 'nav' : 'draw'); this.updateStrip(); flash(this.host, this.prefs.get('touchMode') === 'draw' ? 'Draw with finger' : 'Move and zoom'); } });
       this.strip.append(this.modeBtn, h('div', { class: 'ts-sep' }));
     }
-    this.strip.append(...this.presetBtns, h('div', { class: 'ts-sep' }), eraser, h('div', { class: 'ts-sep' }), this.colorBtn, this.widthBtn,
+    this.strip.append(...this.presetBtns, h('div', { class: 'ts-sep' }), eraser, this.dimBtn, this.snapBtn, h('div', { class: 'ts-sep' }), this.colorBtn, this.widthBtn,
       h('div', { class: 'ts-sep' }),
       h('button', { class: 'ts-btn', 'aria-label': 'Undo', onclick: () => this.undo() }, icon('undo')),
       h('button', { class: 'ts-btn', 'aria-label': 'Redo', onclick: () => this.redo() }, icon('redo')));
@@ -643,10 +855,12 @@ export class Editor {
     }
     this.presetBtns?.forEach((b, i) => {
       const p = presets[i];
-      b.classList.toggle('on', i === active && this.activeTool !== 'eraser');
+      b.classList.toggle('on', i === active && !['eraser', 'dim'].includes(this.activeTool));
       b.querySelector('.ts-dot').style.background = p.color;
     });
     this.eraserBtn?.classList.toggle('on', this.activeTool === 'eraser');
+    this.dimBtn?.classList.toggle('on', this.activeTool === 'dim');
+    this.snapBtn?.classList.toggle('on', !!this.snap.on);
     this.eraserBtn?.classList.toggle('quick', this.quickEraser);
     const p = this.preset;
     if (this.colorBtn) this.colorBtn.querySelector('.swatch').style.background = p.color;

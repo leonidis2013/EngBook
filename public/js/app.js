@@ -129,6 +129,7 @@ class App {
     if (this.currentPageId && !meta) { this.pageDeleted(); return; }
     if (meta) {
       if (!this.stylePanelOpen) this.editor.setMeta(meta);
+      this.editor.setPageInfo(this.pageInfo(meta));
       this.refreshLegend();
       this.renderCrumb();
     }
@@ -136,6 +137,24 @@ class App {
   }
 
   currentMeta() { return this.store.tree.pages.find((p) => p.id === this.currentPageId); }
+
+  /** Pages of a notebook in reading order: loose pages, then each section (and its sub-sections). */
+  notebookOrder(nbId) {
+    const t = this.store.tree;
+    const bySort = (a, b) => (a.sort - b.sort) || (a.createdAt - b.createdAt);
+    const pagesIn = (secId) => t.pages.filter((p) => p.notebookId === nbId && (p.sectionId || null) === secId).sort(bySort);
+    const out = [...pagesIn(null)];
+    for (const s of t.sections.filter((x) => x.notebookId === nbId && !x.parentId).sort(bySort)) {
+      out.push(...pagesIn(s.id));
+      for (const sub of t.sections.filter((x) => x.parentId === s.id).sort(bySort)) out.push(...pagesIn(sub.id));
+    }
+    return out;
+  }
+
+  pageInfo(p) {
+    const order = this.notebookOrder(p.notebookId);
+    return { no: order.findIndex((x) => x.id === p.id) + 1, count: order.length };
+  }
 
   renderCrumb() {
     const p = this.currentMeta();
@@ -163,6 +182,7 @@ class App {
     this.home.style.display = 'none';
     const doc = await this.store.loadPage(id);
     if (this.currentPageId !== id) return;
+    this.editor.pageInfo = this.pageInfo(meta);
     this.editor.open(meta, doc);
     this.refreshLegend();
     this.renderCrumb();
@@ -257,9 +277,9 @@ class App {
       { label: 'Fit page to screen', onClick: () => this.editor.fit() },
       { label: this.editor.showOriginal ? 'Show cleaned handwriting' : 'Compare original handwriting', onClick: () => this.editor.toggleOriginal() },
       '-',
-      { label: 'Print / Save as PDF', onClick: () => printPages([{ meta, strokes: strokes() }]) },
-      { label: 'Export PNG', onClick: () => exportPng(meta, strokes()) },
-      { label: 'Export SVG', onClick: () => exportSvg(meta, strokes()) },
+      { label: 'Print / Save as PDF', onClick: () => printPages([{ meta, strokes: strokes(), info: this.pageInfo(meta) }]) },
+      { label: 'Export PNG', onClick: () => exportPng(meta, strokes(), { info: this.pageInfo(meta) }) },
+      { label: 'Export SVG', onClick: () => exportSvg(meta, strokes(), { info: this.pageInfo(meta) }) },
       { label: 'Export ink only (SVG, no grid)', onClick: () => exportSvg(meta, strokes(), { grid: false }) },
       '-',
       { label: 'Page info', onClick: () => modal('Page info', h('div', { class: 'stack mono small' },
@@ -268,12 +288,12 @@ class App {
   }
 
   async printNotebook(nbId) {
-    const pages = this.store.tree.pages.filter((p) => p.notebookId === nbId);
+    const pages = this.notebookOrder(nbId);
     if (!pages.length) { toast('This notebook has no pages.'); return; }
     toast(`Preparing ${pages.length} page${pages.length === 1 ? '' : 's'}…`);
     try {
       const docs = await Promise.all(pages.map((p) => api('GET', `/api/pages/${p.id}`)));
-      printPages(docs.map((d, i) => ({ meta: pages[i], strokes: d.strokes })));
+      printPages(docs.map((d, i) => ({ meta: pages[i], strokes: d.strokes, info: { no: i + 1, count: pages.length } })));
     } catch (e) { toast(`Could not load pages: ${e.message}`, 'error'); }
   }
 }

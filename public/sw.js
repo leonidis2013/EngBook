@@ -2,12 +2,12 @@
 // Network first (so updates arrive right away), cache as the fallback.
 // Notes themselves are stored by the app in IndexedDB, not here.
 // Copyright (c) 2026 Jerod Ulicki
-const CACHE = 'engbook-shell-v1';
+const CACHE = 'engbook-shell-v2';
 const SHELL = [
   '/', '/index.html', '/css/app.css', '/manifest.webmanifest', '/icons/icon.svg',
   '/js/app.js', '/js/api.js', '/js/store.js', '/js/editor.js', '/js/ink.js', '/js/backgrounds.js',
   '/js/cleanup.js', '/js/library.js', '/js/page-settings.js', '/js/settings-ui.js', '/js/auth-ui.js',
-  '/js/export.js', '/js/icons.js', '/js/util.js',
+  '/js/export.js', '/js/icons.js', '/js/util.js', '/js/shapes.js', '/js/dims.js',
 ];
 
 self.addEventListener('install', (e) => {

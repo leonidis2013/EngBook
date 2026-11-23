@@ -3,6 +3,9 @@
 import { h, download, toast } from './util.js';
 import { strokeToSvg, renderOrder, strokeBounds, drawStroke, UNITS_PER_INCH as IN } from './ink.js';
 import { drawBackground, svgAdapter, canvasAdapter, pageSize, styleOf, TONE_COLORS } from './backgrounds.js';
+import { dimToSvg, drawDim } from './dims.js';
+
+const units = () => { try { return JSON.parse(localStorage.getItem('eb.prefs') || '{}').units || 'in'; } catch { return 'in'; } };
 
 function pageBox(style, strokes) {
   const size = pageSize(style);
@@ -14,14 +17,14 @@ function pageBox(style, strokes) {
   return { x: x0 - m, y: y0 - m, w: x1 - x0 + 2 * m, h: y1 - y0 + 2 * m };
 }
 
-export function pageToSvg(meta, strokes, { grid = true } = {}) {
+export function pageToSvg(meta, strokes, { grid = true, info = {} } = {}) {
   const style = styleOf(meta.style);
   const box = pageBox(style, strokes);
   const tone = style.tone;
   const g = svgAdapter(tone, style.grid ?? 1);
-  if (grid) drawBackground(g, style, { x0: box.x, y0: box.y, x1: box.x + box.w, y1: box.y + box.h }, 4);
+  if (grid) drawBackground(g, style, { x0: box.x, y0: box.y, x1: box.x + box.w, y1: box.y + box.h }, 4, info);
   const bg = TONE_COLORS[tone]?.bg || '#ffffff';
-  const body = renderOrder(strokes).map((s) => strokeToSvg(s, tone)).join('');
+  const body = renderOrder(strokes).map((s) => (s.kind === 'dim' ? dimToSvg(s, { tone, style, units: units(), bg }) : strokeToSvg(s, tone))).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${(box.w / IN).toFixed(3)}in" height="${(box.h / IN).toFixed(3)}in" viewBox="${box.x} ${box.y} ${box.w} ${box.h}">`
     + `<title>${escapeXml(meta.title || 'EngBook page')}</title>`
     + `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="${bg}"/>${grid ? g.toString() : ''}<g>${body}</g></svg>`;
@@ -30,11 +33,11 @@ export function pageToSvg(meta, strokes, { grid = true } = {}) {
 const escapeXml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fileName = (meta, ext) => `${(meta.title || 'page').replace(/[^\w.-]+/g, '_').slice(0, 60)}.${ext}`;
 
-export function exportSvg(meta, strokes, opts) {
+export function exportSvg(meta, strokes, opts = {}) {
   download(fileName(meta, 'svg'), new Blob([pageToSvg(meta, strokes, opts)], { type: 'image/svg+xml' }));
 }
 
-export function exportPng(meta, strokes, { grid = true, scale = 2 } = {}) {
+export function exportPng(meta, strokes, { grid = true, scale = 2, info = {} } = {}) {
   const style = styleOf(meta.style);
   const box = pageBox(style, strokes);
   const c = document.createElement('canvas');
@@ -43,8 +46,9 @@ export function exportPng(meta, strokes, { grid = true, scale = 2 } = {}) {
   ctx.setTransform(scale, 0, 0, scale, -box.x * scale, -box.y * scale);
   ctx.fillStyle = TONE_COLORS[style.tone]?.bg || '#fff';
   ctx.fillRect(box.x, box.y, box.w, box.h);
-  if (grid) { const g = canvasAdapter(ctx, style.tone, scale, style.grid ?? 1); drawBackground(g, style, { x0: box.x, y0: box.y, x1: box.x + box.w, y1: box.y + box.h }, scale); g.flush(); }
-  for (const s of renderOrder(strokes)) drawStroke(ctx, s, { tone: style.tone });
+  if (grid) { const g = canvasAdapter(ctx, style.tone, scale, style.grid ?? 1); drawBackground(g, style, { x0: box.x, y0: box.y, x1: box.x + box.w, y1: box.y + box.h }, scale, info); g.flush(); }
+  const bg = TONE_COLORS[style.tone]?.bg || '#fff';
+  for (const s of renderOrder(strokes)) { if (s.kind === 'dim') drawDim(ctx, s, { tone: style.tone, style, units: units(), bg }); else drawStroke(ctx, s, { tone: style.tone }); }
   c.toBlob((b) => download(fileName(meta, 'png'), b), 'image/png');
 }
 
@@ -56,7 +60,7 @@ export function printPages(pages, { grid = true } = {}) {
   const first = pages[0];
   const box = pageBox(styleOf(first.meta.style), first.strokes);
   const root = h('div', { id: 'print-root' });
-  for (const p of pages) root.append(h('div', { class: 'print-page', html: pageToSvg(p.meta, p.strokes, { grid }) }));
+  for (const p of pages) root.append(h('div', { class: 'print-page', html: pageToSvg(p.meta, p.strokes, { grid, info: p.info }) }));
   const st = h('style', { id: 'print-style' },
     `@page { size: ${(box.w / IN).toFixed(3)}in ${(box.h / IN).toFixed(3)}in; margin: 0; }`);
   document.head.append(st);

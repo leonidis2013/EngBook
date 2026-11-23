@@ -116,7 +116,7 @@ const RULING = { narrow: IN / 4, college: (9 / 32) * IN, wide: (11 / 32) * IN };
  * g: graphics adapter { line(x1,y1,x2,y2,kind), dot(x,y,r,kind), text(x,y,str,opts), rect(x,y,w,h,kind,fill) }
  * rect: visible area in page units; z: zoom (screen px per unit) to skip unreadable detail.
  */
-export function drawBackground(g, style, rect, z = 1) {
+export function drawBackground(g, style, rect, z = 1, info = {}) {
   const s = styleOf(style);
   const size = pageSize(s);
   const area = size ? { x0: Math.max(rect.x0, 0), y0: Math.max(rect.y0, 0), x1: Math.min(rect.x1, size.w), y1: Math.min(rect.y1, size.h) } : rect;
@@ -143,14 +143,17 @@ export function drawBackground(g, style, rect, z = 1) {
       if (r.y1 > r.y0) { hLines(g, gs.s, r, z, 0, top); vLines(g, gs.s, r, z, 0); }
       if (size) {
         g.line(1.1 * IN, top, 1.1 * IN, size.h, 'margin');
-        const cells = [['PROJECT', 0, 3.4], ['SUBJECT', 3.4, 2.4], ['BY', 5.8, 1.1], ['DATE', 6.9, 1.6]];
-        g.rect(0.25 * IN, 0.25 * IN, size.w - 0.5 * IN, 0.55 * IN, 'major');
-        for (const [label, x, w] of cells) {
-          const X = 0.25 * IN + x * IN;
-          if (x > 0) g.line(X, 0.25 * IN, X, 0.8 * IN, 'major');
-          g.text(X + 4, 0.25 * IN + 9, label, { size: 6.5, kind: 'label' });
-          const val = { PROJECT: s.tb.project, SUBJECT: s.tb.title, BY: s.tb.drawnBy, DATE: s.tb.date }[label];
-          if (val) g.text(X + 6, 0.25 * IN + 40, val, { size: 12, kind: 'value', maxWidth: w * IN - 10 });
+        const W = size.w - 0.5 * IN, X0 = 0.25 * IN, Y0 = 0.25 * IN, H = 0.55 * IN;
+        const parts = [['PROJECT', 0.36], ['SUBJECT', 0.29], ['BY', 0.13], ['DATE', 0.13], ['PAGE', 0.09]];
+        g.over.rect(X0, Y0, W, H, 'border', true);
+        let x = X0;
+        for (const [label, frac] of parts) {
+          const w = W * frac;
+          if (x > X0) g.over.line(x, Y0, x, Y0 + H, 'border');
+          g.over.text(x + 5, Y0 + 10, label, { size: 6.5, kind: 'label' });
+          const val = { PROJECT: s.tb.project, SUBJECT: s.tb.title, BY: s.tb.drawnBy, DATE: s.tb.date, PAGE: info.no ? `${info.no} / ${info.count}` : '' }[label];
+          if (val) g.over.text(x + 6, Y0 + H - 11, String(val), { size: 12, kind: 'value', maxWidth: w - 12 });
+          x += w;
         }
       }
       break;
@@ -216,14 +219,17 @@ export function drawBackground(g, style, rect, z = 1) {
     default: break; // blank
   }
 
-  if (size && s.titleBlock && s.type !== 'calc') drawTitleBlock(g, s, size);
+  if (size && s.titleBlock && s.type !== 'calc') drawTitleBlock(g.over, s, size, info);
+  else if (size && s.type !== 'calc' && info.no && s.pageNumbers !== false) {
+    g.over.text(size.w / 2, size.h - 0.3 * IN, `${info.no} / ${info.count}`, { size: 9, kind: 'label', anchor: 'middle', bg: true });
+  }
 }
 
-function drawTitleBlock(g, s, size) {
+function drawTitleBlock(g, s, size, info = {}) {
   const inset = 0.25 * IN;
   g.rect(inset, inset, size.w - 2 * inset, size.h - 2 * inset, 'border');
   const bw = 4 * IN, bh = 1.05 * IN, x = size.w - inset - bw, y = size.h - inset - bh;
-  g.rect(x, y, bw, bh, 'border', true);
+  g.rect(x, y, bw, bh, 'border', true); // filled: the grid never shows through the title block
   const rh = bh / 3, c1 = 3 * IN;
   g.line(x, y + rh, x + bw, y + rh, 'border');
   g.line(x, y + 2 * rh, x + bw, y + 2 * rh, 'border');
@@ -231,11 +237,11 @@ function drawTitleBlock(g, s, size) {
   const cells = [
     ['PROJECT', s.tb.project, x, y], ['REV', s.tb.rev, x + c1, y],
     ['TITLE', s.tb.title, x, y + rh], ['DATE', s.tb.date, x + c1, y + rh],
-    ['DRAWN BY', s.tb.drawnBy, x, y + 2 * rh], ['SHEET', s.tb.sheet, x + c1, y + 2 * rh],
+    ['DRAWN BY', s.tb.drawnBy, x, y + 2 * rh], ['SHEET', s.tb.sheet || (info.no ? `${info.no} OF ${info.count}` : ''), x + c1, y + 2 * rh],
   ];
   for (const [label, val, cx, cy] of cells) {
-    g.text(cx + 4, cy + 8.5, label, { size: 6.5, kind: 'label' });
-    if (val) g.text(cx + 6, cy + rh - 7, String(val), { size: 12, kind: 'value', maxWidth: (cx === x ? c1 : bw - c1) - 12 });
+    g.text(cx + 5, cy + 10, label, { size: 6.5, kind: 'label' });
+    if (val) g.text(cx + 6, cy + rh - 6, String(val), { size: 12, kind: 'value', maxWidth: (cx === x ? c1 : bw - c1) - 12 });
   }
 }
 
@@ -245,14 +251,30 @@ export function canvasAdapter(ctx, tone, z, gridStrength = 1) {
   const paths = { minor: new Path2D(), major: new Path2D(), margin: new Path2D(), border: new Path2D() };
   const dots = new Path2D();
   const texts = [], fills = [];
+  const overPaths = new Path2D(), overFills = [], overTexts = [];
+  const over = {
+    line(x1, y1, x2, y2) { overPaths.moveTo(x1, y1); overPaths.lineTo(x2, y2); },
+    rect(x, y, w, h, kind, fill) { if (fill) overFills.push([x, y, w, h]); overPaths.rect(x, y, w, h); },
+    text(x, y, str, o) { overTexts.push([x, y, str, o]); },
+    circle() {}, dot() {},
+  };
+  const drawTexts = (list) => {
+    for (const [x, y, str, o] of list) {
+      ctx.font = `${o.kind === 'value' ? 500 : 600} ${o.size}px "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace`;
+      ctx.textAlign = o.anchor === 'middle' ? 'center' : 'left';
+      if (o.bg) { const w = ctx.measureText(str).width; ctx.fillStyle = col.bg; ctx.fillRect(x - w / 2 - 4, y - o.size, w + 8, o.size + 4); }
+      ctx.fillStyle = o.kind === 'value' ? col.ink : col.text;
+      ctx.fillText(str, x, y, o.maxWidth);
+    }
+  };
   return {
+    over,
     line(x1, y1, x2, y2, kind) { const p = paths[kind] || paths.minor; p.moveTo(x1, y1); p.lineTo(x2, y2); },
     circle(cx, cy, r, kind) { const p = paths[kind] || paths.minor; p.moveTo(cx + r, cy); p.arc(cx, cy, r, 0, Math.PI * 2); },
     dot(x, y, r) { dots.moveTo(x + r, y); dots.arc(x, y, Math.max(r, 1.1 / z), 0, Math.PI * 2); },
     rect(x, y, w, h, kind, fill) { if (fill) fills.push([x, y, w, h]); (paths[kind] || paths.minor).rect(x, y, w, h); },
     text(x, y, str, o) { texts.push([x, y, str, o]); },
     flush() {
-      for (const [x, y, w, h] of fills) { ctx.fillStyle = col.bg; ctx.fillRect(x, y, w, h); }
       ctx.save();
       ctx.globalAlpha = Math.max(0.2, Math.min(1.6, gridStrength));
       const lw = (base) => Math.max(base, 0.9 / z);
@@ -262,12 +284,12 @@ export function canvasAdapter(ctx, tone, z, gridStrength = 1) {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = col.margin; ctx.lineWidth = lw(0.9); ctx.stroke(paths.margin);
       ctx.strokeStyle = col.ink; ctx.lineWidth = lw(1.2); ctx.stroke(paths.border);
-      for (const [x, y, str, o] of texts) {
-        ctx.font = `${o.kind === 'value' ? 500 : 600} ${o.size}px "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace`;
-        ctx.fillStyle = o.kind === 'value' ? col.ink : col.text;
-        ctx.textAlign = o.anchor === 'middle' ? 'center' : 'left';
-        ctx.fillText(str, x, y, o.maxWidth);
-      }
+      for (const [x, y, w, h] of fills) { ctx.fillStyle = col.bg; ctx.fillRect(x, y, w, h); }
+      drawTexts(texts);
+      // overlay: title block and headers sit on top of the grid, on a solid page-coloured fill
+      for (const [x, y, w, h] of overFills) { ctx.fillStyle = col.bg; ctx.fillRect(x, y, w, h); }
+      ctx.strokeStyle = col.ink; ctx.lineWidth = lw(1.2); ctx.stroke(overPaths);
+      drawTexts(overTexts);
       ctx.restore();
     },
   };
@@ -280,24 +302,59 @@ export function svgAdapter(tone, gridStrength = 1) {
   const col = TONE_COLORS[tone] || TONE_COLORS.paper;
   const d = { minor: [], major: [], margin: [], border: [] };
   const dots = [], texts = [], fills = [];
+  const oPath = [], oFills = [], oTexts = [];
+  const txt = (x, y, str, o) => `${o.bg ? `<text x="${n2(x)}" y="${n2(y)}" font-size="${o.size}" text-anchor="middle" stroke="${col.bg}" stroke-width="6" fill="${col.bg}">${esc(str)}</text>` : ''}<text x="${n2(x)}" y="${n2(y)}" font-size="${o.size}" font-weight="${o.kind === 'value' ? 500 : 600}" fill="${o.kind === 'value' ? col.ink : col.text}"${o.anchor === 'middle' ? ' text-anchor="middle"' : ''}>${esc(str)}</text>`;
+  const over = {
+    line(x1, y1, x2, y2) { oPath.push(`M${n2(x1)} ${n2(y1)}L${n2(x2)} ${n2(y2)}`); },
+    rect(x, y, w, h, kind, fill) { if (fill) oFills.push(`<rect x="${n2(x)}" y="${n2(y)}" width="${n2(w)}" height="${n2(h)}" fill="${col.bg}"/>`); oPath.push(`M${n2(x)} ${n2(y)}h${n2(w)}v${n2(h)}h${n2(-w)}Z`); },
+    text(x, y, str, o) { oTexts.push(txt(x, y, str, o)); },
+    circle() {}, dot() {},
+  };
   return {
+    over,
     line(x1, y1, x2, y2, kind) { (d[kind] || d.minor).push(`M${n2(x1)} ${n2(y1)}L${n2(x2)} ${n2(y2)}`); },
     circle(cx, cy, r, kind) { (d[kind] || d.minor).push(`M${n2(cx + r)} ${n2(cy)}A${n2(r)} ${n2(r)} 0 1 1 ${n2(cx - r)} ${n2(cy)}A${n2(r)} ${n2(r)} 0 1 1 ${n2(cx + r)} ${n2(cy)}`); },
     dot(x, y, r) { dots.push(`<circle cx="${n2(x)}" cy="${n2(y)}" r="${r}"/>`); },
     rect(x, y, w, h, kind, fill) { if (fill) fills.push(`<rect x="${n2(x)}" y="${n2(y)}" width="${n2(w)}" height="${n2(h)}" fill="${col.bg}"/>`); (d[kind] || d.minor).push(`M${n2(x)} ${n2(y)}h${n2(w)}v${n2(h)}h${n2(-w)}Z`); },
-    text(x, y, str, o) {
-      texts.push(`<text x="${n2(x)}" y="${n2(y)}" font-size="${o.size}" font-weight="${o.kind === 'value' ? 500 : 600}" fill="${o.kind === 'value' ? col.ink : col.text}"${o.anchor === 'middle' ? ' text-anchor="middle"' : ''}>${esc(str)}</text>`);
-    },
+    text(x, y, str, o) { texts.push(txt(x, y, str, o)); },
     toString() {
       const op = Math.max(0.2, Math.min(1, gridStrength));
       return [
-        ...fills,
         `<g fill="none" opacity="${op}"><path d="${d.minor.join('')}" stroke="${col.minor}" stroke-width="0.5"/><path d="${d.major.join('')}" stroke="${col.major}" stroke-width="0.9"/></g>`,
         `<g fill="${col.major}" opacity="${op}">${dots.join('')}</g>`,
         `<path d="${d.margin.join('')}" fill="none" stroke="${col.margin}" stroke-width="0.9"/>`,
         `<path d="${d.border.join('')}" fill="none" stroke="${col.ink}" stroke-width="1.2"/>`,
+        ...fills,
         `<g font-family="IBM Plex Mono, ui-monospace, Menlo, monospace">${texts.join('')}</g>`,
+        ...oFills,
+        `<path d="${oPath.join('')}" fill="none" stroke="${col.ink}" stroke-width="1.2"/>`,
+        `<g font-family="IBM Plex Mono, ui-monospace, Menlo, monospace">${oTexts.join('')}</g>`,
       ].join('');
     },
   };
+}
+
+/** Nearest grid point for snapping, or null when the page style has no grid. Returns {x, y, s}. */
+export function gridAt(style, x, y) {
+  const s = styleOf(style);
+  const size = pageSize(s);
+  const near = (v, sp, o = 0) => Math.round((v - o) / sp) * sp + o;
+  switch (s.type) {
+    case 'graph': { const g = graphSpec(s.graph); return { x: near(x, g.s), y: near(y, g.s), s: g.s }; }
+    case 'dot': return { x: near(x, 5 * MM), y: near(y, 5 * MM), s: 5 * MM };
+    case 'calc': { const sp = 5 * MM, top = size ? 0.9 * IN : 0; return { x: near(x, sp), y: near(y, sp, top), s: sp }; }
+    case 'iso': case 'isodot': {
+      const a = 5 * MM, hx = a * Math.sin(Math.PI / 3);
+      let best = null, bd = Infinity;
+      const i0 = Math.round(x / hx);
+      for (const i of [i0 - 1, i0, i0 + 1]) {
+        const off = (Math.abs(i) % 2) * a / 2;
+        const yy = near(y, a, off), xx = i * hx, dd = Math.hypot(xx - x, yy - y);
+        if (dd < bd) { bd = dd; best = { x: xx, y: yy, s: a }; }
+      }
+      return best;
+    }
+    case 'lined': { const sp = RULING[s.ruling] || RULING.college; return { x, y: near(y, sp, size ? IN : 0), s: sp }; }
+    default: return null;
+  }
 }

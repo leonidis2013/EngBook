@@ -119,7 +119,7 @@ export class Library {
     return h('div', { class: `lib-row page depth-${depth} ${p.id === cur ? 'active' : ''}`, onclick: () => this.app.openPage(p.id) },
       icon(p.pinned ? 'pin' : 'page'),
       h('span', { class: 'lib-name' }, pageTitle(p), path ? h('small', { class: 'lib-path' }, path) : null),
-      h('span', { class: 'lib-meta mono' }, fmtDate(p.updatedAt).slice(5)),
+      h('span', { class: 'lib-meta mono' }, `p${this.app.pageInfo(p).no}`),
       h('button', { class: 'icon-btn sm', 'aria-label': 'Page menu', onclick: (e) => { e.stopPropagation(); this.pageMenu(e.currentTarget, p); } }, icon('more')));
   }
 

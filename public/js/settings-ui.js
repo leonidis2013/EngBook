@@ -23,6 +23,7 @@ const DEFAULTS = {
   theme: 'auto',
   drawnBy: '',
   cleanup: { on: true, smooth: 0.5, straighten: true },
+  snap: { on: true, grid: true, angle: true, ends: true },
   defaultStyle: { type: 'graph', size: 'letter', tone: 'paper', graph: '5' },
 };
 
@@ -79,9 +80,13 @@ function prefsPanel(app) {
     field('Smoothing', h('input', { type: 'range', class: 'range', min: 0, max: 1, step: 0.1, value: c.smooth, oninput: (e) => setClean({ smooth: Number(e.target.value) }) }), 'Light → Neat'),
     h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.straighten, onchange: (e) => setClean({ straighten: e.target.checked }) }), 'Straighten slanted words'),
     h('p', { class: 'muted small' }, 'Your original strokes are always kept. Use "Compare original" in the page menu to see them.'),
+    h('h3', {}, 'Snap (engineering drawings)'),
+    h('p', { class: 'muted small' }, 'Draw a shape and hold the pencil still for half a second to snap it clean. Handwriting is never snapped.'),
+    ...[['on', 'Snap shapes when I hold the pencil'], ['grid', 'Snap to grid points'], ['angle', 'Snap lines to 15° steps'], ['ends', 'Snap to ends, corners and centers of other shapes']].map(([k, label]) =>
+      h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: p.get('snap')[k], onchange: (e) => { p.set('snap', { ...p.get('snap'), [k]: e.target.checked }); app.editor.updateStrip(); } }), label)),
     h('h3', {}, 'Display'),
     field('Theme', seg(p.get('theme'), { auto: 'Match iPad', dark: 'Dark', light: 'Light' }, (v) => { p.set('theme', v); app.applyTheme(); })),
-    field('Units', seg(p.get('units'), { in: 'Inches', mm: 'Millimeters' }, (v) => { p.set('units', v); app.editor.updateReadout(); })),
+    field('Units', seg(p.get('units'), { in: 'Inches', mm: 'Millimeters' }, (v) => { p.set('units', v); app.editor.updateReadout(); app.editor.render(); }), 'Also used for dimensions.'),
     field('Your name for title blocks', h('input', { class: 'input', value: p.get('drawnBy'), placeholder: 'Drawn by', oninput: (e) => p.set('drawnBy', e.target.value) })),
     h('h3', {}, 'Default style for new pages'),
     h('p', { class: 'muted small' }, 'Notebooks and sections can override this.'),

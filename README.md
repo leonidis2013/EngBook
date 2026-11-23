@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.1.1** · © 2026 Jerod Ulicki
+Version **0.2.0** · © 2026 Jerod Ulicki
 
 ---
 
@@ -123,6 +123,13 @@ There are five pen presets: fine-liner, technical pen (fixed width), pencil, red
 - **Color legend** (notebook menu) lets you name what each color means, such as red = revision.
 - On blueprint and dark pages, black ink turns white and the other colors adjust to stay readable.
 
+### Snap and dimensions
+
+- **Snap a shape:** draw it, then hold the pencil still for half a second. EngBook turns it into a clean line, arc, polyline, triangle, rectangle, polygon, circle or ellipse. After a line snaps, keep moving to steer its end; a label shows its length and angle.
+- **What it snaps to:** grid points, 15° angles, and the ends, corners, midpoints and centers of other shapes. Turn snapping on or off with the magnet button; pick which snaps you want in **Settings → Preferences**. Handwriting is never snapped.
+- **Dimensions:** pick the dimension tool (↔) on the tool strip. Tap a line, rectangle, polygon edge, circle, arc or ellipse, or drag between two points. The dimension sits on the left side of the direction you drag.
+- **Drawing scale:** set per page in **Page style** (1:1 to 1:100, 2:1, 4:1, 1" = 1'-0" and other architectural scales). Dimensions follow the page scale and your inch / mm setting.
+
 ### Page styles
 
 | Style | Options |
@@ -137,7 +144,7 @@ There are five pen presets: fine-liner, technical pen (fixed width), pencil, red
 | Calc pad | 5 mm grid with Project / Subject / By / Date header |
 | Title block | border plus Project / Rev / Title / Date / Drawn by / Sheet, on any style |
 
-The page sizes are Letter, Tabloid and endless canvas, in portrait or landscape. The page tone can be white paper, blueprint or dark. You can change a page's style at any time and the ink stays where it is. Notebooks and sections can each have a default style for new pages.
+The page sizes are Letter, Tabloid and endless canvas, in portrait or landscape. Pages are numbered within their notebook ("3 / 12" at the bottom, or in the title block's SHEET box). The page tone can be white paper, blueprint or dark. You can change a page's style at any time and the ink stays where it is. Notebooks and sections can each have a default style for new pages.
 
 ### Handwriting cleanup
 
@@ -201,7 +208,7 @@ docker run --rm -v engbook-data:/data -v "$PWD":/backup alpine \
 
 ## Roadmap
 
-- **0.2:** lasso select / move / recolor, partial eraser, PDF import for Apple Notes exports and datasheets, read-only share links, page version history, learn mode (guided handwriting samples).
+- **0.3:** lasso select / move / recolor, partial eraser, PDF import for Apple Notes exports and datasheets, read-only share links, page version history, learn mode (guided handwriting samples).
 - **1.1:** shape snap, dimensions, ruler / protractor / compass, symbol libraries (audio, electrical, network, PLC / P&ID), calc blocks with units, revision clouds.
 - **2.0:** learned handwriting cleanup, handwriting search, handwritten math to typeset, Claude MCP access, Paperless archive.
 

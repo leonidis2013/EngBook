@@ -30,6 +30,8 @@ export const ICONS = {
   fit: svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>'),
   compare: svg('<path d="M12 3v18"/><path d="M4 8c2-2 4 2 6 0M14 8c2-2 4 2 6 0M4 16h6M14 16h6"/>'),
   hand: svg('<path d="M8 13V5.5a1.5 1.5 0 013 0V11M11 10.5V4a1.5 1.5 0 013 0v6.5M14 10.5V5.5a1.5 1.5 0 013 0V14a7 7 0 01-7 7h-.5a6 6 0 01-4.6-2.2L3 16.2a1.6 1.6 0 012.4-2.1L8 16"/>'),
+  dim: svg('<path d="M3 8v8M21 8v8M3 12h18"/><path d="M6 9.5L3 12l3 2.5M18 9.5l3 2.5-3 2.5"/>'),
+  magnet: svg('<path d="M6 4v8a6 6 0 0012 0V4"/><path d="M6 4h3v8a3 3 0 006 0V4h3"/><path d="M6 8h3M15 8h3"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="1"/><path d="M8 11V8a4 4 0 018 0v3"/>'),
 };
 
