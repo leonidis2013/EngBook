@@ -24,7 +24,7 @@ services:
     container_name: engbook
     restart: unless-stopped
     ports:
-      - "8085:8080"
+      - "8091:8080"
     environment:
       - TZ=America/Chicago
     volumes:
@@ -65,7 +65,7 @@ server {
   client_max_body_size 25m;
 
   location / {
-    proxy_pass http://TRUENAS_IP:8085;
+    proxy_pass http://TRUENAS_IP:8091;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -74,7 +74,7 @@ server {
 
   # live sync stream: no buffering, long timeout
   location /api/events {
-    proxy_pass http://TRUENAS_IP:8085;
+    proxy_pass http://TRUENAS_IP:8091;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
