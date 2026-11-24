@@ -21,6 +21,7 @@ Version **0.3.1** · © 2026 Jerod Ulicki
 services:
   engbook:
     image: ghcr.io/leonidis2013/engbook:latest
+    pull_policy: always   # download the newest image every time the app starts
     container_name: engbook
     restart: unless-stopped
     ports:
@@ -35,6 +36,8 @@ volumes:
 ```
 
 All data (one SQLite database) lives in the `engbook-data` named volume.
+
+**Updating:** with `pull_policy: always`, just **Stop** then **Start** the app in TrueNAS (or Edit → Save). It downloads the newest image each time. Then use **Settings → Data → Reload app** on each device.
 
 The image is built by GitHub Actions on every push to `main`. If the package is private, either make it public under *GitHub → Packages → engbook → Package settings*, or sign in to `ghcr.io` on the server. You can also build it locally by replacing `image:` with `build: .`.
 

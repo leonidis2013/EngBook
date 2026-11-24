@@ -2,6 +2,7 @@
 services:
   engbook:
     image: ghcr.io/leonidis2013/engbook:latest
+    pull_policy: always   # download the newest image every time the app starts
     # or build from this repo instead of pulling:
     # build: .
     container_name: engbook
