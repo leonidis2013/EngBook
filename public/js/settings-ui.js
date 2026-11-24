@@ -5,6 +5,7 @@ import { api, passkeysSupported } from './api.js';
 import { addPasskey } from './auth-ui.js';
 import { styleEditor } from './page-settings.js';
 import { printTestRuler } from './export.js';
+import { openLearn } from './learn.js';
 
 const DEFAULTS = {
   presets: [
@@ -24,6 +25,9 @@ const DEFAULTS = {
   drawnBy: '',
   cleanup: { on: true, smooth: 0.5, straighten: true },
   snap: { on: true, grid: true, angle: true, ends: true },
+  drawMode: 'free',      // 'free' = ink as drawn, 'dim' = every stroke snaps into a clean shape
+  eraserKind: 'stroke',  // 'stroke' | 'part'
+  stripCollapsed: false,
   defaultStyle: { type: 'graph', size: 'letter', tone: 'paper', graph: '5' },
 };
 
@@ -80,6 +84,12 @@ function prefsPanel(app) {
     field('Smoothing', h('input', { type: 'range', class: 'range', min: 0, max: 1, step: 0.1, value: c.smooth, oninput: (e) => setClean({ smooth: Number(e.target.value) }) }), 'Light → Neat'),
     h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.straighten, onchange: (e) => setClean({ straighten: e.target.checked }) }), 'Straighten slanted words'),
     h('p', { class: 'muted small' }, 'Your original strokes are always kept. Use "Compare original" in the page menu to see them.'),
+    h('h3', {}, 'Drawing mode'),
+    field('New strokes', seg(p.get('drawMode'), { free: 'Freestyle', dim: 'Dimensional' }, (v) => { p.set('drawMode', v); app.editor.updateStrip(); }),
+      'Dimensional turns every stroke into a clean, snapped shape when you lift the pencil (small strokes like letters stay as written). Also on the tool strip.'),
+    h('h3', {}, 'Handwriting training'),
+    h('p', { class: 'muted small' }, 'Teach EngBook your handwriting, see your letter sheet, and practice your least consistent letters.'),
+    h('button', { class: 'btn ghost', onclick: () => { document.querySelector('.modal-back')?.remove(); openLearn(app); } }, 'Open handwriting training'),
     h('h3', {}, 'Snap (engineering drawings)'),
     h('p', { class: 'muted small' }, 'Draw a shape and hold the pencil still for half a second to snap it clean. Handwriting is never snapped.'),
     ...[['on', 'Snap shapes when I hold the pencil'], ['grid', 'Snap to grid points'], ['angle', 'Snap lines to 15° steps'], ['ends', 'Snap to ends, corners and centers of other shapes']].map(([k, label]) =>

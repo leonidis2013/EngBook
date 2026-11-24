@@ -4,6 +4,7 @@
 // the screen (canvas) and to SVG for export and printing.
 // Copyright (c) 2026 Jerod Ulicki
 import { UNITS_PER_INCH as IN, UNITS_PER_MM as MM } from './ink.js';
+import { SCALES } from './dims.js';
 
 export const PAGE_SIZES = {
   letter: { label: 'Letter (8.5 × 11 in)', w: 8.5 * IN, h: 11 * IN },
@@ -237,11 +238,14 @@ function drawTitleBlock(g, s, size, info = {}) {
   const cells = [
     ['PROJECT', s.tb.project, x, y], ['REV', s.tb.rev, x + c1, y],
     ['TITLE', s.tb.title, x, y + rh], ['DATE', s.tb.date, x + c1, y + rh],
-    ['DRAWN BY', s.tb.drawnBy, x, y + 2 * rh], ['SHEET', s.tb.sheet || (info.no ? `${info.no} OF ${info.count}` : ''), x + c1, y + 2 * rh],
+    ['DRAWN BY', s.tb.drawnBy, x, y + 2 * rh], ['SCALE', (SCALES[s.scale] || SCALES['1:1']).short, x + 2 * IN, y + 2 * rh],
+    ['SHEET', s.tb.sheet || (info.no ? `${info.no} OF ${info.count}` : ''), x + c1, y + 2 * rh],
   ];
+  g.line(x + 2 * IN, y + 2 * rh, x + 2 * IN, y + bh, 'border');
   for (const [label, val, cx, cy] of cells) {
     g.text(cx + 5, cy + 10, label, { size: 6.5, kind: 'label' });
-    if (val) g.text(cx + 6, cy + rh - 6, String(val), { size: 12, kind: 'value', maxWidth: (cx === x ? c1 : bw - c1) - 12 });
+    const cw = cx === x ? (label === 'DRAWN BY' ? 2 * IN : c1) : label === 'SCALE' ? c1 - 2 * IN : bw - c1;
+    if (val) g.text(cx + 6, cy + rh - 6, String(val), { size: 12, kind: 'value', maxWidth: cw - 12 });
   }
 }
 

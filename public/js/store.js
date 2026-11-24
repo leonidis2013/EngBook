@@ -9,12 +9,15 @@ const DB_NAME = 'engbook';
 
 function idbOpen() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
-      db.createObjectStore('kv');
-      db.createObjectStore('pages', { keyPath: 'id' });
-      db.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true });
+      if (ev.oldVersion < 1) {
+        db.createObjectStore('kv');
+        db.createObjectStore('pages', { keyPath: 'id' });
+        db.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true });
+      }
+      if (ev.oldVersion < 2) db.createObjectStore('assets');
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -202,6 +205,16 @@ export class Store extends EventTarget {
     await this.enqueue({ type: 'ops', pageId: id, ops });
   }
 
+  // ---------------- images ----------------
+  async putAsset(id, blob, mime) {
+    await idb(this.db, 'assets', 'readwrite', (s) => s.put({ blob, mime }, id));
+    await this.enqueue({ type: 'asset', id, mime });
+  }
+
+  async getAsset(id) {
+    try { const r = await idb(this.db, 'assets', 'readonly', (s) => reqP(s.get(id))); return r ? r.blob : null; } catch { return null; }
+  }
+
   closePage(id) {
     const doc = this.docs.get(id);
     if (doc) { clearTimeout(doc._saveT); idb(this.db, 'pages', 'readwrite', (s) => s.put({ id: doc.id, strokes: doc.strokes, rev: doc.rev })).catch(() => {}); }
@@ -234,7 +247,15 @@ export class Store extends EventTarget {
           }
         }
         try {
-          if (entry.type === 'ops') {
+          if (entry.type === 'asset') {
+            const blob = await this.getAsset(entry.id);
+            if (blob) {
+              let res;
+              try { res = await fetch(`/api/assets/${entry.id}`, { method: 'PUT', credentials: 'same-origin', headers: { 'X-EngBook': '1', 'Content-Type': entry.mime }, body: blob }); }
+              catch { throw new ApiError(0, 'Offline'); }
+              if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+            }
+          } else if (entry.type === 'ops') {
             const r = await api('POST', `/api/pages/${entry.pageId}/ops`, { clientId: this.clientId, ops: entry.ops });
             const doc = this.docs.get(entry.pageId);
             if (doc && r.rev > doc.rev) this.fetchChanges(entry.pageId);
@@ -277,6 +298,7 @@ export class Store extends EventTarget {
     };
     this.es.onmessage = (m) => {
       let ev; try { ev = JSON.parse(m.data); } catch { return; }
+      if (ev.type === 'hello') { this.emit('server-version', { version: ev.version }); return; }
       if (ev.clientId && ev.clientId === this.clientId) return;
       if (ev.type === 'tree' || ev.type === 'pagemeta') this.debouncedTree();
       if (ev.type === 'page' && this.docs.has(ev.id)) this.fetchChanges(ev.id);

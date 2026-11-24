@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.2.1** · © 2026 Jerod Ulicki
+Version **0.3.0** · © 2026 Jerod Ulicki
 
 ---
 
@@ -123,6 +123,26 @@ There are five pen presets: fine-liner, technical pen (fixed width), pencil, red
 - **Color legend** (notebook menu) lets you name what each color means, such as red = revision.
 - On blueprint and dark pages, black ink turns white and the other colors adjust to stay readable.
 
+### Drawing modes, lasso and eraser
+
+- **Freestyle / Dimensional** (tool strip button, or Settings): in Dimensional mode every stroke becomes a clean, snapped shape when you lift the pencil. Small strokes such as letters stay as written. In Freestyle, hold the pencil still at the end of a stroke to snap just that one.
+- **Lasso:** circle what you want, then drag inside the box to move it. The selection bar recolors, duplicates or deletes.
+- **Eraser:** tap the ALL / PART button under the color to switch between removing whole strokes and erasing only where you rub.
+- **Collapse the tool strip** with the arrow at its top; only the tools in use stay visible.
+
+### Images and PDFs
+
+- **Insert image…** (page menu) places a photo on the page; move it with the lasso.
+- **Import PDF as pages…** (page, notebook or section menu, or Home) turns each PDF page into an EngBook page you can write on. Good for Apple Notes exports, datasheets and manuals.
+
+### Handwriting training
+
+Open it from **Home** or **Settings → Preferences**.
+
+1. **Guided session:** write each character three times (lowercase, uppercase, digits, engineering symbols).
+2. **My letters:** your most typical version of each character with a consistency score.
+3. **Practice:** your least consistent characters, with your own best version as a faint guide to trace; scores of 70+ are saved as new samples.
+
 ### Snap and dimensions
 
 - **Snap a shape:** draw it, then hold the pencil still for half a second. EngBook turns it into a clean line, arc, polyline, triangle, rectangle, polygon, circle or ellipse. After a line snaps, keep moving to steer its end; a label shows its length and angle.
@@ -208,7 +228,7 @@ docker run --rm -v engbook-data:/data -v "$PWD":/backup alpine \
 
 ## Roadmap
 
-- **0.3:** lasso select / move / recolor, partial eraser, PDF import for Apple Notes exports and datasheets, read-only share links, page version history, learn mode (guided handwriting samples).
+- **0.4:** read-only share links, page version history, handwriting search, learned handwriting cleanup, layers.
 - **1.1:** shape snap, dimensions, ruler / protractor / compass, symbol libraries (audio, electrical, network, PLC / P&ID), calc blocks with units, revision clouds.
 - **2.0:** learned handwriting cleanup, handwriting search, handwritten math to typeset, Claude MCP access, Paperless archive.
 

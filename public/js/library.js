@@ -4,6 +4,7 @@ import { h, askText, confirmBox, menu, modal, fmtDate, uid, toast } from './util
 import { icon } from './icons.js';
 import { styleEditor } from './page-settings.js';
 import { PALETTE } from './ink.js';
+import { importPdf } from './import.js';
 
 const NB_COLORS = ['#22c3e6', '#f5a524', '#ef4444', '#22c55e', '#a78bfa', '#f472b6', '#94a3b8', '#eab308'];
 
@@ -151,6 +152,7 @@ export class Library {
     menu(anchor, [
       { label: 'New page', onClick: () => this.newPage(nb.id, null) },
       { label: 'New section', onClick: () => this.newSection(nb.id) },
+      { label: 'Import PDF as pages…', onClick: () => importPdf(this.app, nb.id, null) },
       '-',
       { label: 'Rename', onClick: async () => { const v = await askText('Rename notebook', nb.name); if (v) s.mutate('nb.update', { id: nb.id, name: v }); } },
       { label: 'Cover color', onClick: () => this.pickColor(nb) },
@@ -171,6 +173,7 @@ export class Library {
     menu(anchor, [
       { label: 'New page', onClick: () => this.newPage(sec.notebookId, sec.id) },
       ...(sec.parentId ? [] : [{ label: 'New sub-section', onClick: () => this.newSection(sec.notebookId, sec.id) }]),
+      { label: 'Import PDF as pages…', onClick: () => importPdf(this.app, sec.notebookId, sec.id) },
       '-',
       { label: 'Rename', onClick: async () => { const v = await askText('Rename section', sec.name); if (v) s.mutate('sec.update', { id: sec.id, name: v }); } },
       { label: 'Default page style', onClick: () => this.editDefaultStyle('sec', sec) },

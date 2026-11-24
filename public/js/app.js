@@ -11,6 +11,9 @@ import { renderSetup, renderLogin, logoSvg } from './auth-ui.js';
 import { styleEditor } from './page-settings.js';
 import { exportSvg, exportPng, printPages } from './export.js';
 import { styleOf } from './backgrounds.js';
+import { initAssets } from './assets.js';
+import { insertImage, importPdf } from './import.js';
+import { openLearn } from './learn.js';
 
 const BOOT_AT = performance.now();
 /** Fade out the loading screen. Shown at least ~0.9 s on a cold start so it doesn't just flash. */
@@ -36,7 +39,8 @@ class App {
     const t = this.prefs.get('theme');
     const light = t === 'light' || (t === 'auto' && matchMedia('(prefers-color-scheme: light)').matches);
     document.documentElement.dataset.theme = light ? 'light' : 'dark';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', light ? '#eef1f4' : '#0d0f12');
+    // solid status bar in the app's own top-bar colour (no translucent blur over the app)
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.setAttribute('content', light ? '#ffffff' : '#13161b'); m.removeAttribute('media'); });
     this.editor?.render();
   }
 
@@ -62,12 +66,14 @@ class App {
   async start({ offline }) {
     if (!this.version) this.version = (document.querySelector('#loader .ver')?.textContent || '').replace(/^v/, '').replace('{{VERSION}}', '');
     await this.store.init();
+    initAssets(this.store, () => this.editor?.render());
     this.buildLayout();
     this.store.addEventListener('status', (e) => this.showStatus(e.detail));
     this.store.addEventListener('tree', () => this.onTree());
     this.store.addEventListener('page', (e) => { if (e.detail.id === this.currentPageId) this.editor.onRemoteChange(); });
     this.store.addEventListener('page-missing', (e) => { if (e.detail.id === this.currentPageId) this.pageDeleted(); });
     this.store.addEventListener('auth', () => { localStorage.removeItem('eb.signedIn'); location.reload(); });
+    this.store.addEventListener('server-version', (e) => this.checkVersion(e.detail.version));
     this.store.addEventListener('dropped', (e) => toast(`A change could not be saved: ${e.detail.error}`, 'error', 6000));
     this.showStatus({ status: this.store.status, pending: this.store.pending });
     this.library.render();
@@ -83,6 +89,19 @@ class App {
     hideLoader();
     const low = sessionStorage.getItem('eb.lowRecovery');
     if (low) { sessionStorage.removeItem('eb.lowRecovery'); toast(`Only ${low} recovery code${low === '1' ? '' : 's'} left. Make new ones in Settings.`, 'warn', 7000); }
+  }
+
+  checkVersion(v) {
+    if (!v || !this.version || v === this.version || this.updateShown) return;
+    this.updateShown = true;
+    const bar = h('div', { class: 'update-bar' },
+      h('span', {}, `EngBook v${v} is available (this device has v${this.version}).`),
+      h('button', { class: 'btn primary sm', onclick: async () => {
+        try { const regs = await navigator.serviceWorker?.getRegistrations(); for (const r of regs || []) await r.update(); } catch {}
+        location.reload();
+      } }, 'Reload now'),
+      h('button', { class: 'btn ghost sm', onclick: () => bar.remove() }, 'Later'));
+    document.body.append(bar);
   }
 
   async firstRun() {
@@ -255,13 +274,21 @@ class App {
           h('span', { class: 'card-date mono' }, fmtDate(p.updatedAt))))) : h('p', { class: 'muted' }, 'No pages yet. Make a notebook from the library.'),
         h('div', { class: 'row gap' },
           h('button', { class: 'btn primary', onclick: () => this.quickNote() }, icon('plus'), 'Quick note'),
-          h('button', { class: 'btn ghost', onclick: () => this.toggleSidebar(true) }, icon('notebook'), 'Library'))));
+          h('button', { class: 'btn ghost', onclick: () => this.toggleSidebar(true) }, icon('notebook'), 'Library'),
+          h('button', { class: 'btn ghost', onclick: () => this.importPdfQuick() }, icon('page'), 'Import PDF'),
+          h('button', { class: 'btn ghost', onclick: () => openLearn(this) }, icon('learn'), 'Handwriting training'))));
   }
 
   async quickNote() {
     let nb = this.store.tree.notebooks.find((n) => n.name === 'Quick notes' && !n.archived) || this.store.tree.notebooks.find((n) => !n.archived);
     if (!nb) nb = await this.store.mutate('nb.create', { id: uid(), name: 'Quick notes', color: '#22c3e6', stack: '', defaultStyle: {}, legend: [], archived: false });
     await this.createPage(nb.id, null);
+  }
+
+  async importPdfQuick() {
+    let nb = this.store.tree.notebooks.find((n) => n.name === 'Imported PDFs' && !n.archived);
+    if (!nb) nb = await this.store.mutate('nb.create', { id: uid(), name: 'Imported PDFs', color: '#94a3b8', stack: '', defaultStyle: {}, legend: [], archived: false });
+    await importPdf(this, nb.id, null);
   }
 
   refreshLegend() {
@@ -287,6 +314,8 @@ class App {
     const strokes = () => this.editor.doc?.strokes || [];
     menu(anchor, [
       { label: 'Fit page to screen', onClick: () => this.editor.fit() },
+      { label: 'Insert image…', onClick: () => insertImage(this) },
+      { label: 'Import PDF as pages…', onClick: () => importPdf(this, meta.notebookId, meta.sectionId) },
       { label: this.editor.showOriginal ? 'Show cleaned handwriting' : 'Compare original handwriting', onClick: () => this.editor.toggleOriginal() },
       '-',
       { label: 'Print / Save as PDF', onClick: () => printPages([{ meta, strokes: strokes(), info: this.pageInfo(meta) }]) },

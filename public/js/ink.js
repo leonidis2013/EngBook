@@ -177,7 +177,7 @@ export function strokeToSvg(stroke, tone = 'paper') {
 
 // Order for rendering: highlighters underneath ink.
 export function renderOrder(strokes) {
-  const under = [], over = [];
-  for (const s of strokes) ((TOOLS[s.tool] || {}).under ? under : over).push(s);
-  return under.concat(over);
+  const imgs = [], under = [], over = [];
+  for (const s of strokes) (s.kind === 'image' ? imgs : (TOOLS[s.tool] || {}).under ? under : over).push(s);
+  return imgs.concat(under, over);
 }

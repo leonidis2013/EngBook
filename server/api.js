@@ -39,6 +39,18 @@ function validStroke(s) {
   return true;
 }
 
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const MAX_ASSET = 20 * 1024 * 1024;
+
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Image too large (20 MB max)'), { status: 413 })); req.destroy(); return; } chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 export function dataRoutes(db, { readBody, send, HttpError, broadcast }) {
   const q = {
     tree: () => ({
@@ -226,6 +238,49 @@ export function dataRoutes(db, { readBody, send, HttpError, broadcast }) {
         ops: rows.map((r) => ({ seq: r.seq, op: r.op, id: r.stroke_id, clientId: r.client_id,
           stroke: r.op !== 'del' && r.data ? JSON.parse(r.data) : undefined })),
       });
+    }
+
+    // ----- images -----
+    if ((mm = p.match(/^\/api\/assets\/([A-Za-z0-9_-]{8,40})$/))) {
+      if (m === 'PUT') {
+        const mime = String(req.headers['content-type'] || '').split(';')[0].trim();
+        if (!IMAGE_TYPES.has(mime)) throw new HttpError(415, 'Only PNG, JPEG, WebP or GIF images');
+        const buf = await readRaw(req, MAX_ASSET);
+        db.prepare('INSERT INTO assets(id, mime, bytes, data, created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').run(mm[1], mime, buf.length, buf, now());
+        return send(res, 200, { ok: true, id: mm[1] });
+      }
+      if (m === 'GET') {
+        const row = db.prepare('SELECT mime, data FROM assets WHERE id = ?').get(mm[1]);
+        if (!row) throw new HttpError(404, 'Image not found');
+        res.writeHead(200, { 'Content-Type': row.mime, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(Buffer.from(row.data));
+      }
+    }
+
+    // ----- handwriting learn mode -----
+    if (p === '/api/learn/samples' && m === 'GET') {
+      const rows = db.prepare('SELECT id, ch, data, source, created_at FROM hw_samples ORDER BY created_at').all();
+      return send(res, 200, rows.map((r) => ({ id: r.id, ch: r.ch, strokes: JSON.parse(r.data), source: r.source, createdAt: r.created_at })));
+    }
+    if (p === '/api/learn/samples' && m === 'POST') {
+      const b = await readBody(req);
+      const list = Array.isArray(b.samples) ? b.samples.slice(0, 500) : [];
+      const ins = db.prepare('INSERT INTO hw_samples(id, ch, data, source, created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING');
+      tx(db, () => { for (const sm of list) {
+        const data = JSON.stringify(sm.strokes || []);
+        if (!sm.ch || data.length > 60000) continue;
+        ins.run(clean.id(sm.id), clean.str(sm.ch, 4), data, clean.str(sm.source || 'guided', 20), now());
+      } });
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/learn/samples' && m === 'DELETE') {
+      const ch = url.searchParams.get('ch');
+      if (ch) db.prepare('DELETE FROM hw_samples WHERE ch = ?').run(ch); else db.prepare('DELETE FROM hw_samples').run();
+      return send(res, 200, { ok: true });
+    }
+    if ((mm = p.match(/^\/api\/learn\/samples\/([A-Za-z0-9_-]+)$/)) && m === 'DELETE') {
+      db.prepare('DELETE FROM hw_samples WHERE id = ?').run(mm[1]);
+      return send(res, 200, { ok: true });
     }
 
     // ----- export -----

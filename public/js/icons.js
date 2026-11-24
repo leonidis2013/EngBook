@@ -32,6 +32,16 @@ export const ICONS = {
   hand: svg('<path d="M8 13V5.5a1.5 1.5 0 013 0V11M11 10.5V4a1.5 1.5 0 013 0v6.5M14 10.5V5.5a1.5 1.5 0 013 0V14a7 7 0 01-7 7h-.5a6 6 0 01-4.6-2.2L3 16.2a1.6 1.6 0 012.4-2.1L8 16"/>'),
   dim: svg('<path d="M3 8v8M21 8v8M3 12h18"/><path d="M6 9.5L3 12l3 2.5M18 9.5l3 2.5-3 2.5"/>'),
   magnet: svg('<path d="M6 4v8a6 6 0 0012 0V4"/><path d="M6 4h3v8a3 3 0 006 0V4h3"/><path d="M6 8h3M15 8h3"/>'),
+  lasso: svg('<path d="M12 5c4.4 0 8 2 8 4.5S16.4 14 12 14 4 12 4 9.5 7.6 5 12 5z" stroke-dasharray="2.5 2.5"/><path d="M6 13c-1 2 0 4 2 4s2 2 1 4"/>'),
+  free: svg('<path d="M3 16c2-6 4-8 6-4s3 6 5 1 3-7 7-4"/>'),
+  draft: svg('<path d="M4 20V4l16 16z"/><path d="M8 16v-4l4 4z"/>'),
+  collapse: svg('<path d="M15 6l-6 6 6 6"/>'),
+  expand: svg('<path d="M9 6l6 6-6 6"/>'),
+  image: svg('<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>'),
+  copy: svg('<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M16 8V4H4v12h4"/>'),
+  trash: svg('<path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13"/>'),
+  check: svg('<path d="M5 12l5 5 9-10"/>'),
+  learn: svg('<path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10v5c3 2 7 2 10 0v-5"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="1"/><path d="M8 11V8a4 4 0 018 0v3"/>'),
 };
 

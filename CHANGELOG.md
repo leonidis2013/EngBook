@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 — 2026-11-23
+
+### Added
+- **Drawing modes:** Freestyle (ink stays as drawn) or Dimensional (every stroke snaps into a clean shape when you lift the pencil, with grid/angle/endpoint snapping; small strokes like letters stay as written). Button on the tool strip and in Settings.
+- **Lasso:** select ink, shapes, dimensions and images; drag to move; recolor, duplicate or delete from the selection bar.
+- **Partial eraser:** erase only where you rub (tap the eraser's ALL/PART button to switch).
+- **Images:** Insert image… from the page menu (photos are resized to keep pages light). Works offline; uploads when back online.
+- **PDF import:** Import PDF as pages… from the page, notebook or section menu, or from Home. Each PDF page becomes a page you can write on.
+- **Handwriting training:** guided sessions (lowercase, uppercase, digits, engineering symbols), My letters sheet with a consistency score per character, and Practice drills that trace over your own best version and score you. Samples are stored on your server.
+- **Update notice** when the server runs a newer version than the open app.
+- **Bundled IBM Plex fonts** so every device and printout looks the same.
+- **SCALE** box in the title block, filled from the page's drawing scale.
+
+### Changed
+- Solid status bar on iPad/iPhone home-screen app (no translucent blur over the top of the app).
+- Canvas lines up exactly with screen pixels for sharper ink and grids.
+- The tool strip never covers the page: fitted pages leave room for it, and it can be collapsed to just the active tools.
+
 ## 0.2.1 — 2026-11-23
 
 ### Added

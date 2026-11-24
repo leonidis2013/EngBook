@@ -20,6 +20,7 @@ export const SCALES = {
   '1/4in=1ft': { label: '1/4" = 1\'-0"', f: 48, arch: true },
   '1/8in=1ft': { label: '1/8" = 1\'-0"', f: 96, arch: true },
 };
+for (const v of Object.values(SCALES)) v.short = v.label.replace(' (full size)', '');
 
 export function scaleOf(style) { return SCALES[style?.scale] || SCALES['1:1']; }
 

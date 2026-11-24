@@ -108,6 +108,25 @@ export function openDb() {
       at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ops_page ON ops(page_id, seq);
+
+    -- Images placed on pages (photos, imported PDF pages)
+    CREATE TABLE IF NOT EXISTS assets (
+      id TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      data BLOB NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    -- Handwriting learn mode: samples of each character
+    CREATE TABLE IF NOT EXISTS hw_samples (
+      id TEXT PRIMARY KEY,
+      ch TEXT NOT NULL,
+      data TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'guided',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS hw_ch ON hw_samples(ch);
   `);
   return db;
 }

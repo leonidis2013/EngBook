@@ -121,7 +121,7 @@ setInterval(() => { for (const res of listeners) res.write(': ping\n\n'); }, 250
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json',
-  '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.mjs': 'text/javascript; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
 };
 
 function serveStatic(req, res, urlPath) {
