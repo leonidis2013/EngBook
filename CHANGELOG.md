@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-11-23
+
+### Changed
+- New boot screen: a quick engineering sketch of the EngBook logo and wordmark (outline, ruled lines, signal trace, then the name drawn and filled, with a dimension line and version). Larger, higher contrast, and shown long enough to see (about 1.9 s). Still pure SVG/CSS.
+- Compose file uses `pull_policy: always` so Stop / Start in TrueNAS updates the app.
+
 ## 0.3.1 — 2026-11-23
 
 ### Added

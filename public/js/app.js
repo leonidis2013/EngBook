@@ -16,11 +16,12 @@ import { insertImage, importPdf } from './import.js';
 import { openLearn } from './learn.js';
 
 const BOOT_AT = performance.now();
-/** Fade out the loading screen. Shown at least ~0.9 s on a cold start so it doesn't just flash. */
+/** Fade out the boot screen once its sketch has finished (~1.9 s), or when the app is ready if that's later. */
 function hideLoader() {
   const el = document.getElementById('loader');
   if (!el || el.classList.contains('done')) return;
-  const wait = Math.max(0, 900 - (performance.now() - BOOT_AT));
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wait = Math.max(0, (reduce ? 700 : 1900) - (performance.now() - BOOT_AT));
   setTimeout(() => { el.classList.add('done'); setTimeout(() => el.remove(), 400); }, wait);
 }
 
