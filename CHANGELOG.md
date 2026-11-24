@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — 2026-11-24
+
+### Fixed
+- Pop-up windows (like "Delete all handwriting samples?") opened behind the handwriting training screen. Dialogs, menus and messages now always appear on top.
+
 ## 0.4.1 — 2026-11-24
 
 ### Fixed

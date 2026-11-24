@@ -373,3 +373,9 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .ts-grip:hover, .ts-grip:active { background: var(--hover); }
 .ts-grip i { width: 5px; height: 5px; }
 @media (min-width: 641px) { .thumbstrip { touch-action: none; overflow: visible; max-height: none; } }
+
+/* v0.4.2: layer order — full screens (45) < dialogs (80) < menus/popovers (85) < toasts (90) < boot screen (100) */
+.modal-back { z-index: 80; }
+.popover, .menu { z-index: 85; }
+#toasts { z-index: 90; }
+.update-bar { z-index: 75; }
