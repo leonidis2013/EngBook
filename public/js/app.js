@@ -6,7 +6,7 @@ import { api } from './api.js';
 import { Store } from './store.js';
 import { Editor } from './editor.js';
 import { Library, pageTitle } from './library.js';
-import { Prefs, openSettings } from './settings-ui.js';
+import { Prefs, openSettings, reloadApp } from './settings-ui.js';
 import { renderSetup, renderLogin, logoSvg } from './auth-ui.js';
 import { styleEditor } from './page-settings.js';
 import { exportSvg, exportPng, printPages } from './export.js';
@@ -96,10 +96,7 @@ class App {
     this.updateShown = true;
     const bar = h('div', { class: 'update-bar' },
       h('span', {}, `EngBook v${v} is available (this device has v${this.version}).`),
-      h('button', { class: 'btn primary sm', onclick: async () => {
-        try { const regs = await navigator.serviceWorker?.getRegistrations(); for (const r of regs || []) await r.update(); } catch {}
-        location.reload();
-      } }, 'Reload now'),
+      h('button', { class: 'btn primary sm', onclick: () => reloadApp() }, 'Reload now'),
       h('button', { class: 'btn ghost sm', onclick: () => bar.remove() }, 'Later'));
     document.body.append(bar);
   }

@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.3.0** · © 2026 Jerod Ulicki
+Version **0.3.1** · © 2026 Jerod Ulicki
 
 ---
 

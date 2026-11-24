@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 — 2026-11-23
+
+### Added
+- **Settings → Data → Reload app**: fetches the newest app files from your server and restarts EngBook (notes and offline changes are kept). The update banner's Reload now button does the same.
+
 ## 0.3.0 — 2026-11-23
 
 ### Added

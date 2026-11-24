@@ -160,6 +160,9 @@ function dataPanel(app) {
     h('h3', {}, 'Printing'),
     h('p', { class: 'muted' }, 'Print this once to check your printer is set to 100% so grids measure true.'),
     h('button', { class: 'btn ghost', onclick: () => printTestRuler() }, 'Print test ruler'),
+    h('h3', {}, 'App version'),
+    h('p', { class: 'muted small' }, `This device is running v${app.version}. Reload to get the newest version from your server (your notes are not affected).`),
+    h('button', { class: 'btn primary', onclick: () => reloadApp() }, 'Reload app'),
     h('h3', {}, 'This device'),
     h('p', { class: 'muted small' }, `Changes waiting to sync: ${app.store.pending}`),
     h('button', { class: 'btn ghost', onclick: async () => {
@@ -169,4 +172,15 @@ function dataPanel(app) {
     h('h3', {}, 'About'),
     h('p', { class: 'muted mono small' }, `EngBook v${app.version} · © 2026 Jerod Ulicki`),
   );
+}
+
+/** Fetch the newest app files from the server and restart the app. Notes and offline changes are kept. */
+export async function reloadApp() {
+  toast('Reloading EngBook…');
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations()) || [];
+    await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    if (window.caches) for (const k of await caches.keys()) if (k.startsWith('engbook-shell')) await caches.delete(k);
+  } catch {}
+  location.reload();
 }
