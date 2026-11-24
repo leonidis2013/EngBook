@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.3.2** · © 2026 Jerod Ulicki
+Version **0.4.0** · © 2026 Jerod Ulicki
 
 ---
 
@@ -169,7 +169,11 @@ Open it from **Home** or **Settings → Preferences**.
 
 The page sizes are Letter, Tabloid and endless canvas, in portrait or landscape. Pages are numbered within their notebook ("3 / 12" at the bottom, or in the title block's SHEET box). The page tone can be white paper, blueprint or dark. You can change a page's style at any time and the ink stays where it is. Notebooks and sections can each have a default style for new pages.
 
-### Handwriting cleanup
+### Handwriting cleanup (v0.4)
+
+Choose **Uppercase engineering** (default) or **Everyday handwriting** lettering in Settings. Uppercase gets crisp straight strokes, upright letters, even heights and a level baseline; everyday keeps your own slant (learned in training), just steadier. **Align writing to rows and grid lines** sits each word on the nearest ruled line or grid line.
+
+### Handwriting cleanup (details)
 
 On by default. You can change it in **Settings → Preferences**.
 

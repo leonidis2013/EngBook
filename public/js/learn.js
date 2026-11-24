@@ -7,13 +7,21 @@ import { h, toast, uid, confirmBox } from './util.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
 import { traceStroke } from './ink.js';
+import { measureSlant } from './cleanup.js';
 
 export const SETS = {
   lower: { label: 'Lowercase a–z', chars: 'abcdefghijklmnopqrstuvwxyz'.split('') },
   upper: { label: 'Uppercase A–Z', chars: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('') },
   digits: { label: 'Digits 0–9', chars: '0123456789'.split('') },
   symbols: { label: 'Engineering symbols', chars: ['Ω', 'µ', '°', '±', 'Δ', '√', 'Ø', '≈', '≤', '≥', '∞', 'π', '+', '−', '×', '÷', '=', '%', '/', '"', "'"] },
+  words: { label: 'Words & labels', words: true, chars: [] },
 };
+// Real labels you'd write on a drawing: teaches spacing, slant and letter height in context.
+const WORDS_UPPER = ['48 VDC', 'QTY 4', 'Ø6.5 THRU', 'R12 TYP.', 'STAGE LEFT', 'CAT6 RUN', 'SEE DWG A-101', '±0.1 MM', 'NOTES:', 'MAX 20A', 'XLR TO TRS', 'REV B'];
+const WORDS_MIXED = ['the quick fix', 'check wiring', 'Monday 9am', 'stage left', 'order 4 more', 'see page 12', 'mic 3 low', 'call back', 'budget $250', 'done'];
+function setOrder(lettering) {
+  return lettering === 'upper' ? ['upper', 'digits', 'words', 'symbols', 'lower'] : ['lower', 'upper', 'digits', 'words', 'symbols'];
+}
 const REPS = 3;
 const N = 48; // resample size
 
@@ -50,20 +58,32 @@ export function charStats(samples) {
   return { count: rs.length, best: best.s, bestR: best.r, consistency: rs.length > 1 ? score(total / rs.length) : null };
 }
 
+/** Your writing profile from all samples: average slant (+ = leaning right) and how steady it is. */
+export function writingProfile(samples) {
+  const sl = samples.map((s) => measureSlant(s.strokes)).filter((v) => isFinite(v) && v !== 0);
+  if (sl.length < 3) return null;
+  const mean = sl.reduce((a, b) => a + b, 0) / sl.length;
+  const sd = Math.sqrt(sl.reduce((a, b) => a + (b - mean) ** 2, 0) / sl.length);
+  const words = samples.filter((s) => s.source === 'word');
+  return { slant: Math.round(mean * 1000) / 1000, slantDeg: Math.round(Math.atan(mean) * 180 / Math.PI), steadiness: Math.max(0, Math.round(100 - sd * 300)), samples: samples.length, words: words.length };
+}
+
 // ---------------------------------------------------------------- writing box
 /** A square box you write one character in. Returns { el, strokes(), clear(), setGuide(strokes) }. */
-function writingBox(size = 200, { onStroke } = {}) {
+function writingBox(size = 110, { onStroke, width, upper = true } = {}) {
+  const W = width || size;
   const dpr = Math.min(3, window.devicePixelRatio || 1);
-  const c = h('canvas', { class: 'learn-canvas', width: size * dpr, height: size * dpr, style: { width: `${size}px`, height: `${size}px` } });
+  const c = h('canvas', { class: 'learn-canvas', width: W * dpr, height: size * dpr, style: { width: `${W}px`, height: `${size}px` } });
   const ctx = c.getContext('2d');
   let strokes = [], cur = null, guide = null, pid = null;
   const draw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size, size);
-    ctx.fillStyle = '#fdfdfb'; ctx.fillRect(0, 0, size, size);
-    // guide lines: baseline, x-height, cap height
+    ctx.clearRect(0, 0, W, size);
+    ctx.fillStyle = '#fdfdfb'; ctx.fillRect(0, 0, W, size);
+    // guide lines: baseline + cap height (uppercase) or baseline, x-height, cap height
     ctx.strokeStyle = 'rgba(56,132,186,0.35)'; ctx.lineWidth = 1;
-    for (const [y, dash] of [[size * 0.75, []], [size * 0.45, [4, 4]], [size * 0.2, [2, 6]]]) { ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(8, y); ctx.lineTo(size - 8, y); ctx.stroke(); }
+    const lines = upper ? [[size * 0.78, []], [size * 0.22, [3, 5]]] : [[size * 0.75, []], [size * 0.45, [4, 4]], [size * 0.2, [2, 6]]];
+    for (const [y, dash] of lines) { ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(6, y); ctx.lineTo(W - 6, y); ctx.stroke(); }
     ctx.setLineDash([]);
     if (guide) {
       ctx.save(); ctx.globalAlpha = 0.18; ctx.fillStyle = '#1d4ed8';
@@ -82,7 +102,7 @@ function writingBox(size = 200, { onStroke } = {}) {
   draw();
   return {
     el: c,
-    strokes: () => strokes.map((s) => s.map((p) => [p[0] / size * 100, p[1] / size * 100, p[2]].map((v) => Math.round(v * 100) / 100))),
+    strokes: () => strokes.map((s) => s.map((p) => [p[0] / size * 100, p[1] / size * 100, p[2]].map((v) => Math.round(v * 100) / 100))), // height = 100 units
     clear: () => { strokes = []; cur = null; draw(); },
     setGuide: (sample) => { guide = sample ? sample.map((s) => s.map((p) => [p[0] / 100 * size, p[1] / 100 * size, p[2]])) : null; draw(); },
     empty: () => !strokes.length,
@@ -90,9 +110,10 @@ function writingBox(size = 200, { onStroke } = {}) {
 }
 
 /** Small rendering of a sample for the letter sheet. */
-function sampleThumb(strokes, size = 64, color = '#111') {
+function sampleThumb(strokes, size = 64, color = '#111', width) {
   const dpr = Math.min(3, window.devicePixelRatio || 1);
-  const c = h('canvas', { width: size * dpr, height: size * dpr, style: { width: `${size}px`, height: `${size}px` } });
+  const W = width || size;
+  const c = h('canvas', { width: W * dpr, height: size * dpr, style: { width: `${W}px`, height: `${size}px` } });
   const ctx = c.getContext('2d'); ctx.setTransform(dpr * size / 100, 0, 0, dpr * size / 100, 0, 0);
   ctx.fillStyle = color;
   for (const st of strokes || []) { const p = new Path2D(); traceStroke(p, { tool: 'tech', width: 1.4, pts: st }); ctx.fill(p); }
@@ -102,6 +123,9 @@ function sampleThumb(strokes, size = 64, color = '#111') {
 // ---------------------------------------------------------------- screen
 export async function openLearn(app) {
   let samples = [];
+  const lettering = app.prefs.get('lettering') || 'upper';
+  const words = () => (lettering === 'upper' ? WORDS_UPPER : WORDS_MIXED);
+  const updateProfile = async () => { try { await load(); const pr = writingProfile(samples); if (pr) app.prefs.set('hwProfile', pr); } catch {} };
   const load = async () => { try { samples = await api('GET', '/api/learn/samples'); } catch (e) { toast(e.message, 'error'); } };
   const byChar = () => { const m = new Map(); for (const s of samples) { if (!m.has(s.ch)) m.set(s.ch, []); m.get(s.ch).push(s); } return m; };
 
@@ -124,29 +148,40 @@ export async function openLearn(app) {
   function guidedStart() {
     const counts = byChar();
     return h('div', { class: 'learn-pane stack' },
-      h('p', { class: 'muted' }, `Write each character ${REPS} times the way you normally do. About 10 minutes for everything. Your samples stay on your server and feed the consistency scores, practice drills and future cleanup.`),
-      h('div', { class: 'set-grid' }, Object.entries(SETS).map(([k, set]) => {
+      h('p', { class: 'muted' }, `Write each character ${REPS} times, then a few real labels, the way you normally do${lettering === 'upper' ? ' (uppercase engineering lettering)' : ''}. About 8 minutes. Samples stay on your server and tune the cleanup, scores and practice drills.`),
+      h('div', { class: 'set-grid' }, setOrder(lettering).map((k) => {
+        const set = SETS[k];
+        if (set.words) {
+          const list = words(); const done = list.filter((w) => (counts.get(w) || []).length >= 1).length;
+          return h('button', { class: 'set-card', onclick: () => body.replaceChildren(wordSession(list)) },
+            h('span', { class: 'set-name' }, set.label), h('span', { class: 'mono muted' }, `${done} / ${list.length} done`),
+            h('span', { class: 'set-bar' }, h('i', { style: { width: `${(done / list.length) * 100}%` } })));
+        }
         const done = set.chars.filter((c) => (counts.get(c) || []).length >= REPS).length;
         return h('button', { class: 'set-card', onclick: () => body.replaceChildren(guided(set.chars)) },
-          h('span', { class: 'set-name' }, set.label), h('span', { class: 'mono muted' }, `${done} / ${set.chars.length} done`),
+          h('span', { class: 'set-name' }, set.label + (k === 'lower' && lettering === 'upper' ? ' (optional)' : '')), h('span', { class: 'mono muted' }, `${done} / ${set.chars.length} done`),
           h('span', { class: 'set-bar' }, h('i', { style: { width: `${(done / set.chars.length) * 100}%` } })));
       })),
-      h('button', { class: 'btn primary', onclick: () => body.replaceChildren(guided(Object.values(SETS).flatMap((s) => s.chars))) }, 'Start full session'));
+      h('button', { class: 'btn primary', onclick: () => {
+        const keys = setOrder(lettering).filter((k) => !(k === 'lower' && lettering === 'upper') && !SETS[k].words);
+        body.replaceChildren(guided(keys.flatMap((k) => SETS[k].chars), () => body.replaceChildren(wordSession(words()))));
+      } }, 'Start full session'));
   }
 
-  function guided(chars) {
+  function guided(chars, onDone) {
     let i = 0;
     const pane = h('div', { class: 'learn-pane stack' });
     const step = () => {
+      if (i >= chars.length && onDone) { onDone(); return; }
       if (i >= chars.length) { pane.replaceChildren(h('h3', {}, 'Session complete'), h('p', {}, `Saved ${chars.length * REPS} samples.`), h('button', { class: 'btn primary', onclick: () => show('sheet') }, 'See my letters')); return; }
       const ch = chars[i];
-      const size = Math.min(220, Math.floor((Math.min(window.innerWidth, 900) - 80) / REPS));
-      const boxes = Array.from({ length: REPS }, () => writingBox(size));
+      const size = Math.max(84, Math.min(120, Math.floor((Math.min(window.innerWidth, 900) - 80) / REPS)));
+      const boxes = Array.from({ length: REPS }, () => writingBox(size, { upper: lettering === 'upper' }));
       const save = async () => {
         if (boxes.some((b) => b.empty())) { toast(`Write "${ch}" in all ${REPS} boxes first.`, 'warn'); return; }
         try {
           await api('POST', '/api/learn/samples', { samples: boxes.map((b) => ({ id: uid(), ch, strokes: b.strokes(), source: 'guided' })) });
-          i++; step();
+          i++; step(); updateProfile();
         } catch (e) { toast(e.message, 'error'); }
       };
       pane.replaceChildren(
@@ -158,6 +193,32 @@ export async function openLearn(app) {
           h('button', { class: 'btn ghost', onclick: () => { i++; step(); } }, 'Skip'),
           h('div', { class: 'grow' }),
           h('button', { class: 'btn primary', onclick: save }, 'Save & next')));
+    };
+    step();
+    return pane;
+  }
+
+  // ---- words & labels ----
+  function wordSession(list) {
+    let i = 0;
+    const pane = h('div', { class: 'learn-pane stack' });
+    const step = () => {
+      if (i >= list.length) { pane.replaceChildren(h('h3', {}, 'Words done'), h('p', {}, 'Your slant, spacing and letter height are now part of your profile.'), h('button', { class: 'btn primary', onclick: () => show('sheet') }, 'See my writing')); return; }
+      const word = list[i];
+      const box = writingBox(110, { width: Math.min(560, window.innerWidth - 48), upper: lettering === 'upper' });
+      pane.replaceChildren(
+        h('div', { class: 'row gap' }, h('span', { class: 'mono muted' }, `${i + 1} / ${list.length}`), h('span', { class: 'set-bar grow' }, h('i', { style: { width: `${(i / list.length) * 100}%` } }))),
+        h('div', { class: 'prompt' }, h('span', { class: 'prompt-word mono' }, word), h('span', { class: 'muted' }, 'Write it as you would on a drawing')),
+        box.el,
+        h('div', { class: 'row gap' },
+          h('button', { class: 'btn ghost', onclick: () => box.clear() }, 'Clear'),
+          h('button', { class: 'btn ghost', onclick: () => { i++; step(); } }, 'Skip'),
+          h('div', { class: 'grow' }),
+          h('button', { class: 'btn primary', onclick: async () => {
+            if (box.empty()) { toast('Write the label first.', 'warn'); return; }
+            try { await api('POST', '/api/learn/samples', { samples: [{ id: uid(), ch: word, strokes: box.strokes(), source: 'word' }] }); i++; step(); updateProfile(); }
+            catch (e) { toast(e.message, 'error'); }
+          } }, 'Save & next')));
     };
     step();
     return pane;
@@ -181,9 +242,18 @@ export async function openLearn(app) {
         h('span', { class: 'glyph-ch mono' }, ch), sampleThumb(st.best.strokes, 64),
         h('span', { class: 'glyph-score mono' }, st.consistency == null ? `${st.count}×` : `${st.consistency}%`)));
     }
+    const prof = writingProfile(samples);
+    const wordSamples = samples.filter((x) => x.source === 'word');
     return h('div', { class: 'learn-pane stack' },
-      h('p', { class: 'muted' }, `Your most typical version of each character. The score shows how alike your samples are (100% = identical every time).${n ? ` Overall: ${Math.round(sum / n)}%.` : ''}`),
+      prof ? h('div', { class: 'profile-card' },
+        h('div', {}, h('span', { class: 'muted small' }, 'Slant'), h('b', { class: 'mono' }, prof.slantDeg === 0 ? 'upright' : `${Math.abs(prof.slantDeg)}° ${prof.slantDeg > 0 ? 'right' : 'left'}`)),
+        h('div', {}, h('span', { class: 'muted small' }, 'Steadiness'), h('b', { class: 'mono' }, `${prof.steadiness}%`)),
+        h('div', {}, h('span', { class: 'muted small' }, 'Letters'), h('b', { class: 'mono' }, n ? `${Math.round(sum / n)}%` : '—')),
+        h('div', {}, h('span', { class: 'muted small' }, 'Samples'), h('b', { class: 'mono' }, String(prof.samples)))) : null,
+      h('p', { class: 'muted' }, `Your most typical version of each character. The score shows how alike your samples are (100% = identical every time). ${lettering === 'upper' ? 'Cleanup makes letters upright and even.' : 'Cleanup keeps your own slant, just steadier.'}`),
       h('div', { class: 'glyph-grid' }, cells),
+      wordSamples.length ? h('h3', {}, 'Words & labels') : null,
+      wordSamples.length ? h('div', { class: 'word-grid' }, wordSamples.slice(-12).map((w) => h('div', { class: 'glyph' }, sampleThumb(w.strokes, 54, '#111', 240), h('span', { class: 'muted small mono' }, w.ch)))) : null,
       h('div', { class: 'row end' }, h('button', { class: 'btn ghost sm danger-text', onclick: async () => {
         if (await confirmBox('Delete all handwriting samples?', 'Your letter sheet and scores will start over.')) { await api('DELETE', '/api/learn/samples'); show('sheet'); }
       } }, 'Delete all samples')));
@@ -209,7 +279,7 @@ export async function openLearn(app) {
     const pane = h('div', { class: 'learn-pane stack' });
     const step = () => {
       const { ch, st } = queue[i % queue.length];
-      const box = writingBox(Math.min(280, window.innerWidth - 60));
+      const box = writingBox(Math.min(170, window.innerWidth - 60), { upper: lettering === 'upper' });
       box.setGuide(st.best.strokes);
       const result = h('div', { class: 'practice-score mono' }, '—');
       const check = async () => {

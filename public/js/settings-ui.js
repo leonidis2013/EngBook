@@ -23,7 +23,8 @@ const DEFAULTS = {
   units: 'in',
   theme: 'auto',
   drawnBy: '',
-  cleanup: { on: true, smooth: 0.5, straighten: true },
+  cleanup: { on: true, smooth: 0.6, straighten: true, upright: true, equalize: true, crisp: true, align: true },
+  lettering: 'upper',    // 'upper' = uppercase engineering lettering, 'mixed' = everyday handwriting
   snap: { on: true, grid: true, angle: true, ends: true },
   drawMode: 'free',      // 'free' = ink as drawn, 'dim' = every stroke snaps into a clean shape
   eraserKind: 'stroke',  // 'stroke' | 'part'
@@ -82,7 +83,12 @@ function prefsPanel(app) {
     h('h3', {}, 'Handwriting cleanup'),
     h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.on, onchange: (e) => setClean({ on: e.target.checked }) }), 'Clean up handwriting as I write'),
     field('Smoothing', h('input', { type: 'range', class: 'range', min: 0, max: 1, step: 0.1, value: c.smooth, oninput: (e) => setClean({ smooth: Number(e.target.value) }) }), 'Light → Neat'),
-    h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.straighten, onchange: (e) => setClean({ straighten: e.target.checked }) }), 'Straighten slanted words'),
+    field('Lettering style', seg(p.get('lettering'), { upper: 'Uppercase engineering', mixed: 'Everyday handwriting' }, (v) => p.set('lettering', v)),
+      'Uppercase engineering: crisp straight strokes, upright letters, even letter heights. Everyday: keeps your own slant, just steadier.'),
+    h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.straighten, onchange: (e) => setClean({ straighten: e.target.checked }) }), 'Level slanted words'),
+    h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.align !== false, onchange: (e) => setClean({ align: e.target.checked }) }), 'Align writing to rows and grid lines'),
+    h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.upright !== false, onchange: (e) => setClean({ upright: e.target.checked }) }), 'Make letters upright (uppercase style)'),
+    h('label', { class: 'row gap toggle-row' }, h('input', { type: 'checkbox', checked: c.equalize !== false, onchange: (e) => setClean({ equalize: e.target.checked }) }), 'Even out letter heights (uppercase style)'),
     h('p', { class: 'muted small' }, 'Your original strokes are always kept. Use "Compare original" in the page menu to see them.'),
     h('h3', {}, 'Drawing mode'),
     field('New strokes', seg(p.get('drawMode'), { free: 'Freestyle', dim: 'Dimensional' }, (v) => { p.set('drawMode', v); app.editor.updateStrip(); }),
@@ -160,6 +166,9 @@ function dataPanel(app) {
     h('h3', {}, 'Printing'),
     h('p', { class: 'muted' }, 'Print this once to check your printer is set to 100% so grids measure true.'),
     h('button', { class: 'btn ghost', onclick: () => printTestRuler() }, 'Print test ruler'),
+    h('h3', {}, 'Getting started'),
+    h('p', { class: 'muted small' }, 'Show the first-time checklist on the Home screen again.'),
+    h('button', { class: 'btn ghost', onclick: () => { const o = app.prefs.get('onb') || {}; app.prefs.set('onb', { ...o, hidden: false }); document.querySelector('.modal-back')?.remove(); app.showHome(); } }, 'Show Getting started'),
     h('h3', {}, 'App version'),
     h('p', { class: 'muted small' }, `This device is running v${app.version}. Reload to get the newest version from your server (your notes are not affected).`),
     h('button', { class: 'btn primary', onclick: () => reloadApp() }, 'Reload app'),

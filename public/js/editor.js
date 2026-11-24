@@ -1,14 +1,14 @@
 // EngBook — the page editor: canvas rendering, Apple Pencil input, finger gestures,
 // tools, eraser, undo/redo, cleanup and the tool wheel.
 // Copyright (c) 2026 Jerod Ulicki
-import { h, uid, toast } from './util.js';
+import { h, uid, toast, modal } from './util.js';
 import { icon } from './icons.js';
 import { TOOLS, PALETTE, LINE_WEIGHTS_MM, HIGHLIGHTER_MM, UNITS_PER_INCH, UNITS_PER_MM,
   drawStroke, drawLiveStroke, strokeBounds, hitStroke, renderOrder, displayColor, invalidate } from './ink.js';
 import { drawBackground, canvasAdapter, pageSize, styleOf, TONE_COLORS, gridAt } from './backgrounds.js';
 import { recognize, snapShape, shapePoints, snapTargets, snapPoint, snapAngle, shapeName, shapeDistance, nearestEdge } from './shapes.js';
-import { makeDim, drawDim, hitDim, dimValue, defaultOffset, formatLength } from './dims.js';
-import { smoothPoints, simplify, straightenGroup } from './cleanup.js';
+import { makeDim, drawDim, hitDim, dimValue, defaultOffset, formatLength, parseLength, scaleOf } from './dims.js';
+import { smoothPoints, simplify, straightenStroke, cleanWord } from './cleanup.js';
 import { applyOpsToDoc } from './store.js';
 import { drawImageObj } from './assets.js';
 
@@ -106,8 +106,49 @@ export class Editor {
   /** Screen space the tool strip takes, so a fitted page is never covered by it. */
   insets() {
     if (!this.strip || this.W < 700 || this.strip.style.display === 'none') return { left: 0, right: 0 };
-    const w = this.strip.offsetWidth + 16;
-    return this.prefs.get('stripSide') === 'left' ? { left: w, right: 0 } : { left: 0, right: w };
+    const host = this.host.getBoundingClientRect(), r = this.strip.getBoundingClientRect();
+    const left = r.left - host.left, right = host.right - r.right;
+    if (left > this.W * 0.35 && right > this.W * 0.35) return { left: 0, right: 0 }; // floating mid-screen: don't reserve
+    return left < right ? { left: left + r.width + 12, right: 0 } : { left: 0, right: right + r.width + 12 };
+  }
+
+  // ---- drag the tool strip anywhere (grip at the top); double-tap the grip to put it back ----
+  placeStrip() {
+    const pos = this.prefs.get('stripPos');
+    const st = this.strip.style;
+    if (!pos || this.W < 700) { st.left = st.top = st.right = st.transform = ''; return; }
+    const w = this.strip.offsetWidth, hh = this.strip.offsetHeight;
+    st.right = 'auto'; st.transform = 'none';
+    st.left = `${Math.max(6, Math.min(this.W - w - 6, pos.x * this.W))}px`;
+    st.top = `${Math.max(6, Math.min(this.H - hh - 6, pos.y * this.H))}px`;
+  }
+
+  bindStripDrag(grip) {
+    let start = null, lastTap = 0;
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      grip.setPointerCapture(e.pointerId);
+      const r = this.strip.getBoundingClientRect(), host = this.host.getBoundingClientRect();
+      start = { x: e.clientX, y: e.clientY, left: r.left - host.left, top: r.top - host.top, moved: false };
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (!start.moved && Math.hypot(dx, dy) < 4) return;
+      start.moved = true;
+      this.prefs.set('stripPos', { x: (start.left + dx) / this.W, y: (start.top + dy) / this.H });
+      this.placeStrip();
+    });
+    const end = () => {
+      if (!start) return;
+      if (!start.moved) {
+        const t = performance.now();
+        if (t - lastTap < 350) { this.prefs.set('stripPos', null); this.placeStrip(); }
+        lastTap = t;
+      }
+      start = null;
+    };
+    grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
   }
 
   // ------------------------------------------------------------------ sizing + rendering
@@ -115,6 +156,7 @@ export class Editor {
     const r = this.wrap.getBoundingClientRect();
     // whole CSS pixels so the canvas maps 1:1 onto screen pixels (no resampling blur)
     this.W = Math.max(1, Math.floor(r.width)); this.H = Math.max(1, Math.floor(r.height));
+    if (this.strip) this.placeStrip();
     this.dpr = Math.min(3, window.devicePixelRatio || 1);
     for (const c of [this.base, this.live]) {
       c.width = Math.round(this.W * this.dpr); c.height = Math.round(this.H * this.dpr);
@@ -183,6 +225,8 @@ export class Editor {
     else drawStroke(ctx, s, { tone: this.tone, showOriginal: this.showOriginal });
   }
 
+  markOnb(k) { const o = this.prefs.get('onb') || {}; if (!o[k]) this.prefs.set('onb', { ...o, [k]: true }); }
+
   setPageInfo(info) { this.pageInfo = info || {}; this.render(); }
 
   drawCropMarks(ctx, x, y, w, h) {
@@ -220,7 +264,10 @@ export class Editor {
     ctx.save();
     this.pageTransform(ctx);
     if (size) { ctx.beginPath(); ctx.rect(0, 0, size.w, size.h); ctx.clip(); } // ink stays on the paper
-    if (this.cur) drawLiveStroke(ctx, this.cur, this.tone, this.cur.shape ? null : this.predicted);
+    if (this.cur && this.preview && !this.cur.shape) {
+      ctx.globalAlpha = 0.22; drawLiveStroke(ctx, { ...this.cur, opacity: 0.22 }, this.tone); ctx.globalAlpha = 1;
+      drawLiveStroke(ctx, { ...this.cur, pts: this.preview.pts }, this.tone);
+    } else if (this.cur) drawLiveStroke(ctx, this.cur, this.tone, this.cur.shape ? null : this.predicted);
     if (this.dimDraft?.dim) this.paint(ctx, this.dimDraft.dim);
     if (this.dragSel && this.sel) {
       ctx.translate(this.dragSel.dx, this.dragSel.dy);
@@ -550,7 +597,13 @@ export class Editor {
     const last = pts[pts.length - 1];
     if (last && Math.hypot(p.x - last[0], p.y - last[1]) < 0.35 / Math.max(0.5, this.view.z)) return;
     const pressure = e.pointerType === 'pen' ? (e.pressure > 0 ? e.pressure : 0.5) : 0.5;
-    pts.push([Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(pressure * 1000) / 1000, Date.now() - this.cur.t0]);
+    const pt = [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(pressure * 1000) / 1000, Date.now() - this.cur.t0];
+    if (e.pointerType === 'pen' && this.cur.tool === 'pencil') { // tilt shading
+      let alt = e.altitudeAngle;
+      if (alt == null && (e.tiltX || e.tiltY)) { const tx = Math.tan(e.tiltX * Math.PI / 180), ty = Math.tan(e.tiltY * Math.PI / 180); alt = Math.atan(1 / Math.hypot(tx, ty)); }
+      if (alt != null) pt.push(Math.round(alt * 100) / 100);
+    }
+    pts.push(pt);
   }
 
   moveDraw(e) {
@@ -566,6 +619,7 @@ export class Editor {
     if (this.cur.shape) { this.adjustShape(this.toPage(e)); return; }
     const evs = e.getCoalescedEvents?.() || [];
     for (const ev of (evs.length ? evs : [e])) this.addPoint(ev);
+    if (this.dimensional && this.cur.tool !== 'highlighter') this.updatePreview();
     // hold the pencil still at the end of a stroke to snap it into a clean shape
     if (this.snap.on) {
       if (!this.holdAnchor || Math.hypot(e.clientX - this.holdAnchor.x, e.clientY - this.holdAnchor.y) > HOLD_PX) {
@@ -581,6 +635,23 @@ export class Editor {
 
   clearHold() { clearTimeout(this.holdTimer); this.holdAnchor = null; }
 
+  /** Dimensional mode: show the clean, snapped shape while the stroke is still being drawn. */
+  updatePreview() {
+    const now = performance.now();
+    if (this._pvT && now - this._pvT < 35) return;
+    this._pvT = now;
+    const c = this.cur;
+    const b = strokeBounds({ ...c, _b: undefined, pts: c.pts });
+    if (Math.max(b.maxX - b.minX, b.maxY - b.minY) < 22) { this.preview = null; this.liveLabel = null; return; }
+    const sh = recognize(c.pts);
+    if (!sh) { this.preview = null; this.liveLabel = null; return; }
+    const opts = this.snapOpts(); const sn = this.snap;
+    opts.gridOn = sn.grid; opts.endsOn = sn.ends; opts.angleOn = sn.angle;
+    const snapped = snapShape(sh, opts);
+    this.preview = { shape: snapped, pts: shapePoints(snapped) };
+    this.liveLabel = this.measureLabel(snapped);
+  }
+
   snapCurrent() {
     const c = this.cur;
     if (!c || c.shape || this.drawPointer == null) return;
@@ -592,6 +663,7 @@ export class Editor {
     c.pts = shapePoints(snapped);
     this.liveLabel = this.measureLabel(snapped);
     navigator.vibrate?.(10);
+    this.markOnb('snap');
     flash(this.host, shapeName(snapped));
     this.renderLive();
   }
@@ -718,8 +790,11 @@ export class Editor {
     if (this.meta) this.renderLive();
   }
 
-  replaceObjects(olds, news) {
+  replaceObjects(olds, news, select = true) {
     if (!olds.length) return;
+    // moved shapes get new ids: point dimensions that moved with them at the new ids
+    const idMap = new Map(olds.map((o, i) => [o.id, news[i]?.id]));
+    for (const n of news) if (n.kind === 'dim' && n.ref && idMap.get(n.ref.id)) n.ref = { ...n.ref, id: idMap.get(n.ref.id) };
     const ops = [...olds.map((o) => ({ op: 'del', id: o.id })), ...news.map((n) => ({ op: 'add', stroke: n }))];
     this.store.pageOps(this.doc.id, ops);
     this.pushHistory({
@@ -727,7 +802,7 @@ export class Editor {
       redo: [...olds.map((o) => ({ op: 'del', id: o.id })), ...news.map((n) => ({ op: 'undel', id: n.id }))],
     });
     this.render();
-    this.select(news.map((n) => n.id));
+    if (select) this.select(news.map((n) => n.id));
   }
 
   deleteSelection() {
@@ -781,7 +856,8 @@ export class Editor {
     const opts = this.snapOpts();
     opts.endsOn = true; // dimensions always lock onto shape points
     const sp = snapPoint([p.x, p.y], opts);
-    this.dimDraft = { start: sp.p, down: { x: p.x, y: p.y }, moved: false, dim: null };
+    const onDim = this.doc.strokes.find((x) => x.kind === 'dim' && hitDim(x, p.x, p.y, 8 / this.view.z));
+    this.dimDraft = { start: sp.p, down: { x: p.x, y: p.y }, moved: false, dim: null, onDim };
     this.snapMark = sp.kind ? { x: sp.p[0], y: sp.p[1] } : null;
     this.renderLive();
   }
@@ -806,12 +882,15 @@ export class Editor {
     let dims = [];
     if (d.moved && d.dim) {
       if (Math.hypot(d.dim.b[0] - d.dim.a[0], d.dim.b[1] - d.dim.a[1]) > 3) dims = [makeDim(uid(), 'linear', d.dim.a, d.dim.b, d.dim.off, color)];
+    } else if (d.onDim) {
+      this.renderLive(); this.editDim(d.onDim); return;
     } else {
       dims = this.dimsForTap(d.down, color);
       if (!dims.length) toast('Tap a snapped shape, or drag between two points to dimension.');
     }
     this.renderLive();
     if (!dims.length) return;
+    this.markOnb('snap');
     this.store.pageOps(this.doc.id, dims.map((x) => ({ op: 'add', stroke: x })));
     this.pushHistory({ undo: dims.map((x) => ({ op: 'del', id: x.id })), redo: dims.map((x) => ({ op: 'undel', id: x.id })) });
     this.render();
@@ -827,38 +906,97 @@ export class Editor {
     }
     if (!best) return [];
     const sh = best.shape;
-    const D = (type, a, b, off) => makeDim(uid(), type, a, b, off, color);
-    if (sh.type === 'line') return [D('linear', sh.a, sh.b, defaultOffset(sh.a, sh.b))];
-    if (sh.type === 'circle') {
-      const u = [Math.SQRT1_2, -Math.SQRT1_2];
-      return [D('diameter', [sh.c[0] + u[0] * sh.r, sh.c[1] + u[1] * sh.r], [sh.c[0] - u[0] * sh.r, sh.c[1] - u[1] * sh.r], 0)];
-    }
-    if (sh.type === 'arc') {
-      const t = sh.a0 + sh.sweep / 2;
-      return [D('radius', sh.c, [sh.c[0] + sh.r * Math.cos(t), sh.c[1] + sh.r * Math.sin(t)], 0)];
-    }
-    if (sh.type === 'ellipse') {
-      const { c, rx, ry } = sh;
-      return [D('linear', [c[0] - rx, c[1] - ry], [c[0] + rx, c[1] - ry], defaultOffset([0, 0], [1, 0])), D('linear', [c[0] + rx, c[1] - ry], [c[0] + rx, c[1] + ry], defaultOffset([0, 0], [0, 1], [1, 0]))];
-    }
+    // every dimension remembers which shape (and which edge) it measures, so typing a size can resize it
+    const D = (part, outward) => {
+      const g = dimGeom(sh, part);
+      const off = g.type === 'linear' ? defaultOffset(g.a, g.b, outward) : 0;
+      const d = makeDim(uid(), g.type, g.a, g.b, off, color);
+      d.ref = { id: best.id, part };
+      return d;
+    };
+    if (sh.type === 'line') return [D('line')];
+    if (sh.type === 'circle') return [D('dia')];
+    if (sh.type === 'arc') return [D('rad')];
+    if (sh.type === 'ellipse') return [D('w'), D('h', [1, 0])];
     if (sh.type === 'poly') {
       const pts = sh.pts, n = pts.length;
       const cx = pts.reduce((a, q) => a + q[0], 0) / n, cy = pts.reduce((a, q) => a + q[1], 0) / n;
-      const edgeDim = (i) => {
-        const a = pts[i], b = pts[(i + 1) % n], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        return D('linear', a, b, defaultOffset(a, b, sh.closed ? [mid[0] - cx, mid[1] - cy] : null));
+      const edge = (i) => {
+        const a = pts[i], b = pts[(i + 1) % n];
+        return D(`edge:${i}`, sh.closed ? [(a[0] + b[0]) / 2 - cx, (a[1] + b[1]) / 2 - cy] : null);
       };
       if (sh.rect) {
-        // width along the top edge, height along the right edge
         const edges = [0, 1, 2, 3].map((i) => ({ i, mid: [(pts[i][0] + pts[(i + 1) % 4][0]) / 2, (pts[i][1] + pts[(i + 1) % 4][1]) / 2] }));
         const top = edges.reduce((m, e) => (e.mid[1] < m.mid[1] ? e : m));
         const right = edges.reduce((m, e) => (e.mid[0] > m.mid[0] ? e : m));
-        return [edgeDim(top.i), edgeDim(right.i)];
+        return [edge(top.i), edge(right.i)];
       }
-      return [edgeDim(nearestEdge(sh, [p.x, p.y]))];
+      return [edge(nearestEdge(sh, [p.x, p.y]))];
     }
     return [];
   }
+
+  // ---- type a real size into a dimension ----
+  editDim(d) {
+    const units = this.prefs.get('units'), st = this.style;
+    const shapeStroke = d.ref && this.doc.byId.get(d.ref.id);
+    const current = dimValue({ ...d, text: undefined }, st, units);
+    const input = h('input', { class: 'input mono', value: d.text || current.replace(/^[ØR]/, ''), inputmode: 'decimal', autocomplete: 'off' });
+    const err = h('div', { class: 'form-error' });
+    const finish = () => m.close();
+    const doResize = () => {
+      const inches = parseLength(input.value, units, scaleOf(st).arch);
+      if (!(inches > 0)) { err.textContent = 'Type a size such as 2.5, 63.5 mm, 2 1/2" or 3\'-6".'; return; }
+      const L = (inches * 96) / scaleOf(st).f; // page units
+      this.resizeFromDim(d, shapeStroke, L);
+      finish();
+    };
+    const doLabel = () => {
+      const v = input.value.trim();
+      this.replaceObjects([d], [{ ...JSON.parse(JSON.stringify(d)), id: uid(), text: v || undefined }], false);
+      finish();
+    };
+    const m = modal('Dimension', h('form', { class: 'stack', onsubmit: (e) => { e.preventDefault(); shapeStroke ? doResize() : doLabel(); } },
+      h('p', { class: 'muted small' }, `Measured: ${current} at scale ${scaleOf(st).short}.`),
+      input, err,
+      shapeStroke ? h('button', { type: 'submit', class: 'btn primary' }, 'Resize the shape to this size') : null,
+      h('button', { type: shapeStroke ? 'button' : 'submit', class: `btn ${shapeStroke ? 'ghost' : 'primary'}`, onclick: shapeStroke ? doLabel : null }, 'Change the label only'),
+      d.text ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { this.replaceObjects([d], [{ ...JSON.parse(JSON.stringify(d)), id: uid(), text: undefined }], false); finish(); } }, 'Show the measured size again') : null,
+      !shapeStroke ? h('p', { class: 'muted small' }, 'Dimensions placed by tapping a snapped shape can also resize that shape.') : null));
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+  }
+
+  resizeFromDim(d, stroke, L) {
+    const sh = JSON.parse(JSON.stringify(stroke.shape));
+    const part = d.ref.part;
+    const unit = (a, b) => { const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l, l]; };
+    if (sh.type === 'line') { const [ux, uy] = unit(sh.a, sh.b); sh.b = [sh.a[0] + ux * L, sh.a[1] + uy * L]; }
+    else if (sh.type === 'circle') sh.r = L / 2;
+    else if (sh.type === 'arc') sh.r = L;
+    else if (sh.type === 'ellipse') { if (part === 'w') sh.rx = L / 2; else sh.ry = L / 2; }
+    else if (sh.type === 'poly' && part.startsWith('edge:')) {
+      const i = Number(part.slice(5)), n = sh.pts.length;
+      const [ux, uy, len] = unit(sh.pts[i], sh.pts[(i + 1) % n]);
+      const dx = ux * (L - len), dy = uy * (L - len);
+      const move = (k) => { sh.pts[k] = [sh.pts[k][0] + dx, sh.pts[k][1] + dy]; };
+      if (sh.rect) { move((i + 1) % 4); move((i + 2) % 4); }
+      else if (sh.closed) move((i + 1) % n);
+      else for (let k = i + 1; k < n; k++) move(k);
+    }
+    const ns = { ...JSON.parse(JSON.stringify(stroke)), id: uid(), shape: sh, pts: shapePoints(sh) };
+    delete ns.raw;
+    const oldDims = this.doc.strokes.filter((x) => x.kind === 'dim' && x.ref?.id === stroke.id);
+    const newDims = oldDims.map((od) => {
+      const g = dimGeom(sh, od.ref.part);
+      const nd = makeDim(uid(), g.type, g.a, g.b, od.off, od.color);
+      nd.ref = { id: ns.id, part: od.ref.part };
+      if (od.text && od.id !== d.id) nd.text = od.text;
+      return nd;
+    });
+    this.replaceObjects([stroke, ...oldDims], [ns, ...newDims], false);
+    flash(this.host, `Resized to ${formatLength(L, this.style, this.prefs.get('units'))}`);
+  }
+
 
   endDraw() {
     this.predicted = null;
@@ -881,16 +1019,20 @@ export class Editor {
     this.liveLabel = null; this.snapMark = null;
     const cleanup = this.prefs.get('cleanup');
     if (!s.shape && cleanup.on && s.tool !== 'highlighter' && s.pts.length > 3) {
-      const smoothed = smoothPoints(simplify(s.pts, 0.45), cleanup.smooth);
-      if (smoothed !== s.pts) { s.raw = s.pts; s.pts = smoothed; }
+      const raw = s.pts;
+      let pts = smoothPoints(simplify(s.pts, 0.45), cleanup.smooth);
+      // uppercase engineering lettering: strokes that are straight runs with corners become crisp
+      if (this.prefs.get('lettering') === 'upper' && cleanup.crisp !== false && WRITING_TOOLS.has(s.tool) && !this.dimensional) pts = straightenStroke(pts, cleanup.smooth);
+      if (pts !== raw) { s.raw = raw; s.pts = pts; }
     }
     if (this.dimensional && !s.shape && s.tool !== 'highlighter') this.autoSnap(s);
+    this.preview = null;
     s.created = Date.now();
     this.store.pageOps(this.doc.id, [{ op: 'add', stroke: s }]);
     this.pushHistory({ undo: [{ op: 'del', id: s.id }], redo: [{ op: 'undel', id: s.id }] });
     this.drawCommitted(s);
     this.renderLive();
-    if (!s.shape && cleanup.on && cleanup.straighten && WRITING_TOOLS.has(s.tool)) this.trackWord(s);
+    if (!s.shape && cleanup.on && WRITING_TOOLS.has(s.tool)) this.trackWord(s);
   }
 
   eraseAt(p) {
@@ -913,6 +1055,15 @@ export class Editor {
   }
 
   // ---- word grouping for baseline straightening ----
+  /** Nearest writing line for a baseline: ruled lines on lined paper, grid lines on grid pages. */
+  rowAt(y) {
+    const st = this.style;
+    if (['blank', 'polar', 'semilog'].includes(st.type)) return null;
+    const g = gridAt(st, 0, y);
+    if (!g) return null;
+    return Math.abs(g.y - y) <= g.s * 0.5 ? g.y : null;
+  }
+
   trackWord(s) {
     const b = strokeBounds(s);
     const g = this.group;
@@ -933,7 +1084,17 @@ export class Editor {
     if (!g || !this.doc || this.cur) return;
     const strokes = g.ids.map((id) => this.doc.byId.get(id)).filter((x) => x && !x.shape);
     if (!strokes.length) return;
-    const fixed = straightenGroup(strokes, 1);
+    const cleanup = this.prefs.get('cleanup');
+    const upper = this.prefs.get('lettering') === 'upper';
+    const profile = this.prefs.get('hwProfile');
+    const fixed = cleanWord(strokes.map((x) => x.pts), {
+      strength: Math.max(0.35, cleanup.smooth ?? 0.5),
+      upright: upper && cleanup.upright !== false,
+      targetSlant: !upper && profile?.slant != null ? profile.slant : null,
+      equalize: upper && cleanup.equalize !== false,
+      level: cleanup.straighten !== false,
+      alignY: cleanup.align !== false ? (y) => this.rowAt(y) : null,
+    });
     if (!fixed) return;
     const replacements = strokes.map((s, i) => ({ ...s, id: uid(), pts: fixed[i], raw: s.raw || s.pts }));
     const ops = [...strokes.map((s) => ({ op: 'del', id: s.id })), ...replacements.map((s) => ({ op: 'add', stroke: s }))];
@@ -1033,7 +1194,9 @@ export class Editor {
     this.drawModeBtn = h('button', { class: 'ts-btn', 'aria-label': 'Freestyle or Dimensional drawing',
       onclick: () => { const dim = !this.dimensional; this.prefs.set('drawMode', dim ? 'dim' : 'free'); this.updateStrip(); flash(this.host, dim ? 'Dimensional: strokes snap into clean shapes' : 'Freestyle: ink stays as drawn'); } });
     this.collapseBtn = h('button', { class: 'ts-btn ts-collapse keep', 'aria-label': 'Collapse tools', onclick: () => { this.prefs.set('stripCollapsed', !this.prefs.get('stripCollapsed')); this.updateStrip(); setTimeout(() => this.render(), 50); } });
-    this.strip.prepend(this.collapseBtn);
+    const grip = h('div', { class: 'ts-grip keep', title: 'Drag to move · double-tap to reset' }, h('i'), h('i'), h('i'));
+    this.bindStripDrag(grip);
+    this.strip.prepend(grip, this.collapseBtn);
     this.strip.append(...this.presetBtns, h('div', { class: 'ts-sep' }), eraser, this.lassoBtn, this.dimBtn, h('div', { class: 'ts-sep' }), this.drawModeBtn, this.snapBtn, h('div', { class: 'ts-sep' }), this.colorBtn, this.widthBtn,
       h('div', { class: 'ts-sep' }),
       h('button', { class: 'ts-btn', 'aria-label': 'Undo', onclick: () => this.undo() }, icon('undo')),
@@ -1045,6 +1208,7 @@ export class Editor {
     const presets = this.prefs.get('presets');
     const active = this.prefs.get('activePreset');
     this.strip.classList.toggle('left', this.prefs.get('stripSide') === 'left');
+    requestAnimationFrame(() => this.placeStrip());
     this.strip.style.display = this.meta ? '' : 'none';
     if (this.modeBtn) {
       const draw = this.prefs.get('touchMode') === 'draw';
@@ -1054,7 +1218,7 @@ export class Editor {
     }
     this.presetBtns?.forEach((b, i) => {
       const p = presets[i];
-      b.classList.toggle('on', i === active && !['eraser', 'dim'].includes(this.activeTool));
+      b.classList.toggle('on', i === active && !['eraser', 'dim', 'lasso'].includes(this.activeTool));
       b.querySelector('.ts-dot').style.background = p.color;
     });
     this.eraserBtn?.classList.toggle('on', this.activeTool === 'eraser');
@@ -1234,4 +1398,17 @@ function splitStroke(s, x, y, r) {
   }
   if (cur.length > 1) pieces.push(cur);
   return pieces.map((pts) => ({ id: uid(), tool: s.tool, color: s.color, width: s.width, ...(s.opacity != null ? { opacity: s.opacity } : {}), pts, created: Date.now() }));
+}
+
+/** Where a dimension sits on a shape. part: line · dia · rad · w · h · edge:i */
+function dimGeom(sh, part) {
+  if (sh.type === 'line') return { type: 'linear', a: sh.a, b: sh.b };
+  if (sh.type === 'circle') { const u = [Math.SQRT1_2, -Math.SQRT1_2]; return { type: 'diameter', a: [sh.c[0] + u[0] * sh.r, sh.c[1] + u[1] * sh.r], b: [sh.c[0] - u[0] * sh.r, sh.c[1] - u[1] * sh.r] }; }
+  if (sh.type === 'arc') { const t = sh.a0 + sh.sweep / 2; return { type: 'radius', a: sh.c, b: [sh.c[0] + sh.r * Math.cos(t), sh.c[1] + sh.r * Math.sin(t)] }; }
+  if (sh.type === 'ellipse') {
+    const { c, rx, ry } = sh;
+    return part === 'h' ? { type: 'linear', a: [c[0] + rx, c[1] - ry], b: [c[0] + rx, c[1] + ry] } : { type: 'linear', a: [c[0] - rx, c[1] - ry], b: [c[0] + rx, c[1] - ry] };
+  }
+  const i = Number(String(part).split(':')[1] || 0), n = sh.pts.length;
+  return { type: 'linear', a: sh.pts[i], b: sh.pts[(i + 1) % n] };
 }

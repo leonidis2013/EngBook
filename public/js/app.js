@@ -14,6 +14,7 @@ import { styleOf } from './backgrounds.js';
 import { initAssets } from './assets.js';
 import { insertImage, importPdf } from './import.js';
 import { openLearn } from './learn.js';
+import { checklistCard, refreshFacts } from './onboarding.js';
 
 const BOOT_AT = performance.now();
 /** Fade out the boot screen once its sketch has finished (~1.9 s), or when the app is ready if that's later. */
@@ -85,7 +86,7 @@ class App {
       if (!this.store.tree.notebooks.length) await this.firstRun();
     }
     const last = localStorage.getItem('eb.lastPage');
-    if (last && this.store.tree.pages.some((p) => p.id === last)) await this.openPage(last);
+    if (!this.firstRunDone && last && this.store.tree.pages.some((p) => p.id === last)) await this.openPage(last);
     else this.showHome();
     hideLoader();
     const low = sessionStorage.getItem('eb.lowRecovery');
@@ -104,8 +105,8 @@ class App {
 
   async firstRun() {
     const nb = await this.store.mutate('nb.create', { id: uid(), name: 'Quick notes', color: '#22c3e6', stack: '', defaultStyle: {}, legend: [], archived: false });
-    const p = await this.createPage(nb.id, null, 'Welcome');
-    this.library.reveal(p);
+    await this.store.mutate('page.create', { id: uid(), notebookId: nb.id, sectionId: null, title: 'Welcome', style: { ...styleOf(this.prefs.get('defaultStyle')) }, tags: [], pinned: false, rev: 0 });
+    this.firstRunDone = true;
   }
 
   // ------------------------------------------------------------------ layout
@@ -124,8 +125,7 @@ class App {
       h('button', { class: 'icon-btn', 'aria-label': 'Library', onclick: () => this.toggleSidebar() }, icon('menu')),
       h('button', { class: 'brand-btn', onclick: () => this.showHome(), 'aria-label': 'Home' }, h('span', { class: 'brand-mark', html: logoSvg() }), h('span', { class: 'brand-name' }, 'EngBook'), h('span', { class: 'brand-ver mono' }, this.version ? `v${this.version}` : '')),
       this.crumb, h('div', { class: 'grow' }), this.syncEl,
-      h('div', { class: 'tb-group' }, this.undoBtn, this.redoBtn, this.styleBtn, this.pageMenuBtn),
-      h('button', { class: 'icon-btn', 'aria-label': 'Settings', onclick: () => openSettings(this) }, icon('gear')));
+      h('div', { class: 'tb-group' }, this.undoBtn, this.redoBtn, this.styleBtn, this.pageMenuBtn));
     this.shade = h('div', { class: 'shade', onclick: () => this.toggleSidebar(false) });
     const shell = h('div', { class: `app ${sidebarOpen ? 'with-sidebar' : ''}` }, top, h('div', { class: 'body' }, this.sidebar, this.shade, this.editorHost));
     this.shell = shell;
@@ -262,8 +262,10 @@ class App {
     const t = this.store.tree;
     const recent = [...t.pages].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12);
     const nbOf = (p) => t.notebooks.find((n) => n.id === p.notebookId);
+    refreshFacts();
     this.home.replaceChildren(
       h('div', { class: 'home-inner' },
+        checklistCard(this),
         h('h1', {}, 'Recent pages'),
         recent.length ? h('div', { class: 'cards' }, recent.map((p) => h('button', { class: 'card', onclick: () => this.openPage(p.id) },
           h('span', { class: 'card-bar', style: { background: nbOf(p)?.color || '#888' } }),

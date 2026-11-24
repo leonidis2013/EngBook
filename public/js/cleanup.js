@@ -1,3 +1,4 @@
+import { rdp } from './shapes.js';
 // EngBook — handwriting cleanup. Keeps your hand, just neater.
 // Stage 1: smooth (jitter + pen-down hooks, corners kept)
 // Stage 2: straighten (level each word's baseline)
@@ -121,4 +122,143 @@ export function straightenGroup(strokes, strength = 1) {
     q[0] = r2(cx + dx * c - dy * s); q[1] = r2(cy + dx * s + dy * c);
     return q;
   }));
+}
+
+// ======================================================================
+// v0.4 cleanup: stronger, still your hand.
+// ======================================================================
+
+function turn(a, b, c) {
+  const v1 = [b[0] - a[0], b[1] - a[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+  const l1 = Math.hypot(...v1), l2 = Math.hypot(...v2);
+  if (!l1 || !l2) return 0;
+  return Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (l1 * l2)))) * 180 / Math.PI;
+}
+
+/**
+ * Straighten a stroke that is really one to four straight runs with sharp corners
+ * (most strokes in uppercase engineering lettering: E F H K L M N T V W X Y Z 1 4 7).
+ * Curved strokes (O C S U D …) are left alone.
+ */
+export function straightenStroke(pts, strength = 0.6) {
+  if (!pts || pts.length < 4 || strength <= 0) return pts;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); }
+  const size = Math.max(maxX - minX, maxY - minY);
+  if (size < 5 || size > 64) return pts; // letters only (≈17 mm); drawings are left as drawn
+  const poly = rdp(pts, Math.max(0.9, (0.045 + 0.04 * strength) * size));
+  if (poly.length < 2 || poly.length > 5) return pts;
+  for (let i = 1; i < poly.length - 1; i++) {
+    const t = turn(poly[i - 1], poly[i], poly[i + 1]);
+    if (t > 8 && t < 52) return pts; // a gentle bend = a curve, not a corner
+  }
+  // rebuild the stroke along the straight runs, keeping the pen pressure
+  const out = [];
+  for (let i = 1; i < poly.length; i++) {
+    const a = poly[i - 1], b = poly[i], n = Math.max(2, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+    for (let k = i === 1 ? 0 : 1; k <= n; k++) {
+      const f = k / n, pa = a[2] ?? 0.5, pb = b[2] ?? 0.5;
+      out.push([r2(a[0] + (b[0] - a[0]) * f), r2(a[1] + (b[1] - a[1]) * f), Math.round((pa + (pb - pa) * f) * 1000) / 1000]);
+    }
+  }
+  return out;
+}
+
+/** Slant as dx per unit dy of the near-vertical parts of the writing (0 = upright, + = leaning right). */
+export function measureSlant(strokeList) {
+  let num = 0, den = 0;
+  for (const pts of strokeList) {
+    for (let i = 3; i < pts.length; i += 3) {
+      const a = pts[i - 3], b = pts[i];
+      let dx = b[0] - a[0], dy = b[1] - a[1];
+      if (dy < 0) { dx = -dx; dy = -dy; }
+      const len = Math.hypot(dx, dy);
+      if (len < 2.5 || Math.abs(Math.atan2(dx, dy)) > 0.6) continue; // within ~35° of vertical
+      num += -dx * len / dy * 1; den += len; // y grows downward: a right lean has top to the right
+    }
+  }
+  return den ? num / den : 0;
+}
+
+function clusters(strokeList) {
+  // group strokes into letters by horizontal overlap
+  const items = strokeList.map((pts, i) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    return { i, x0, x1, y0, y1 };
+  }).sort((a, b) => a.x0 - b.x0);
+  const groups = [];
+  for (const it of items) {
+    const g = groups[groups.length - 1];
+    const overlap = g ? Math.min(g.x1, it.x1) - Math.max(g.x0, it.x0) : -1;
+    if (g && overlap > 0.3 * Math.min(g.x1 - g.x0 || 1, it.x1 - it.x0 || 1)) {
+      g.ids.push(it.i); g.x0 = Math.min(g.x0, it.x0); g.x1 = Math.max(g.x1, it.x1); g.y0 = Math.min(g.y0, it.y0); g.y1 = Math.max(g.y1, it.y1);
+    } else groups.push({ ids: [it.i], ...it });
+  }
+  return groups;
+}
+
+const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+
+/**
+ * Clean up one written word / label. strokeList: arrays of points. Returns new arrays, or null when nothing changes.
+ * opts: { strength 0..1, upright, targetSlant, equalize, level, alignY(baselineY) -> targetY|null }
+ */
+export function cleanWord(strokeList, opts = {}) {
+  const k = Math.max(0, Math.min(1, opts.strength ?? 0.6));
+  if (!strokeList.length) return null;
+  let out = strokeList.map((pts) => pts.map((p) => p.slice()));
+  let changed = false;
+  const all = () => out.flat();
+  const bottomOf = () => {
+    const g = clusters(out);
+    return median(g.filter((c) => c.y1 - c.y0 > 3).map((c) => c.y1)) || Math.max(...all().map((p) => p[1]));
+  };
+
+  // 1. upright (or your own steady slant)
+  const target = opts.upright ? 0 : (opts.targetSlant ?? null);
+  if (target != null) {
+    const slant = measureSlant(out);
+    const d = slant - target;
+    const deg = Math.abs(Math.atan(d) * 180 / Math.PI);
+    if (deg > 1.5 && deg < 32) {
+      const base = bottomOf();
+      // shear: x' = x - d*k*(base - y) moves tops back toward the target slant
+      out = out.map((pts, si) => pts.map((p, pi) => { const o = strokeList[si][pi]; const q = p.slice(); q[0] = r2(o[0] - d * Math.min(1, k * 1.35) * (base - o[1])); return q; }));
+      changed = true;
+    }
+  }
+
+  // 2. level the baseline
+  if (opts.level !== false && looksLikeText(out.map((pts) => ({ pts })))) {
+    const fixed = straightenGroup(out.map((pts) => ({ pts })), k);
+    if (fixed) { out = fixed; changed = true; }
+  }
+
+  // 3. even letter heights, all sitting on one baseline (uppercase lettering)
+  if (opts.equalize) {
+    const groups = clusters(out);
+    const tall = groups.filter((g) => g.y1 - g.y0 > 0.45 * Math.max(...groups.map((x) => x.y1 - x.y0)));
+    if (tall.length >= 2) {
+      const H = median(tall.map((g) => g.y1 - g.y0)), base = median(tall.map((g) => g.y1));
+      for (const g of tall) {
+        const h = g.y1 - g.y0;
+        const s = Math.max(0.78, Math.min(1.3, H / h));
+        if (Math.abs(s - 1) < 0.04 && Math.abs(g.y1 - base) < 1) continue;
+        for (const si of g.ids) out[si] = out[si].map((p) => { const q = p.slice(); const ny = base - (g.y1 - p[1]) * s; q[1] = r2(p[1] + (ny - p[1]) * k); return q; });
+        changed = true;
+      }
+    }
+  }
+
+  // 4. sit the word on the nearest ruled line / grid line
+  if (opts.alignY) {
+    const base = bottomOf();
+    const t = opts.alignY(base);
+    if (t != null && Math.abs(t - base) > 0.3) {
+      out = out.map((pts) => pts.map((p) => { const q = p.slice(); q[1] = r2(p[1] + (t - base)); return q; }));
+      changed = true;
+    }
+  }
+  return changed ? out : null;
 }

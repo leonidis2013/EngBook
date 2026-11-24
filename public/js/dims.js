@@ -99,6 +99,7 @@ export function dimGeometry(d, { textW = 60 } = {}) {
 }
 
 export function dimValue(d, style, unitPref) {
+  if (d.text) return d.text;
   const len = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
   const v = formatLength(len, style, unitPref);
   return d.dimType === 'diameter' ? `Ø${v}` : d.dimType === 'radius' ? `R${v}` : v;
@@ -159,4 +160,28 @@ export function defaultOffset(a, b, outward) {
   if (outward) return (n[0] * outward[0] + n[1] * outward[1]) >= 0 ? o : -o;
   if (Math.abs(n[1]) > 0.2) return n[1] < 0 ? o : -o; // up
   return n[0] > 0 ? o : -o; // right
+}
+
+/** Parse a typed size into real inches: 2.5 · 2 1/2 · 2-1/2" · 63.5 mm · 6.35 cm · 3'-6" · 42". Bare numbers use the unit setting. */
+export function parseLength(str, unitPref = 'in', arch = false) {
+  let t = String(str || '').trim().toLowerCase().replace(/^[øør]\s*/, '').replace(/,/g, '.').replace(/[″]/g, '"').replace(/[′’]/g, "'");
+  if (!t) return null;
+  const num = (x) => {
+    x = x.trim();
+    let m = x.match(/^(\d+(?:\.\d+)?)?(?:[\s-]+)?(?:(\d+)\/(\d+))?$/);
+    if (!m || (!m[1] && !m[2])) return null;
+    return (m[1] ? Number(m[1]) : 0) + (m[2] ? Number(m[2]) / Number(m[3]) : 0);
+  };
+  let m;
+  if ((m = t.match(/^(.+?)\s*mm$/))) { const v = num(m[1]); return v == null ? null : v / 25.4; }
+  if ((m = t.match(/^(.+?)\s*cm$/))) { const v = num(m[1]); return v == null ? null : v / 2.54; }
+  if ((m = t.match(/^(.+?)\s*m$/))) { const v = num(m[1]); return v == null ? null : v / 0.0254; }
+  if ((m = t.match(/^(\d+(?:\.\d+)?)\s*(?:'|ft)\s*-?\s*(.*?)\s*(?:"|in)?$/))) {
+    const ft = Number(m[1]); const inch = m[2] ? num(m[2]) : 0;
+    return inch == null ? null : ft * 12 + inch;
+  }
+  if ((m = t.match(/^(.+?)\s*(?:"|in|inch|inches)$/))) return num(m[1]);
+  const v = num(t);
+  if (v == null) return null;
+  return unitPref === 'mm' && !arch ? v / 25.4 : v;
 }

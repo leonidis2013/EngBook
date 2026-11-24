@@ -5,6 +5,7 @@ import { icon } from './icons.js';
 import { styleEditor } from './page-settings.js';
 import { PALETTE } from './ink.js';
 import { importPdf } from './import.js';
+import { openSettings } from './settings-ui.js';
 
 const NB_COLORS = ['#22c3e6', '#f5a524', '#ef4444', '#22c55e', '#a78bfa', '#f472b6', '#94a3b8', '#eab308'];
 
@@ -20,7 +21,8 @@ export class Library {
       h('div', { class: 'lib-head' }, h('div', { class: 'search-wrap' }, icon('search'), this.search)),
       this.list,
       h('div', { class: 'lib-foot' },
-        h('button', { class: 'btn ghost wide', onclick: () => this.newNotebook() }, icon('plus'), 'New notebook')));
+        h('button', { class: 'btn ghost wide', onclick: () => this.newNotebook() }, icon('plus'), 'New notebook'),
+        h('button', { class: 'lib-settings', onclick: () => { if (this.app.narrow()) this.app.toggleSidebar(false); openSettings(this.app); } }, icon('gear'), h('span', {}, 'Settings'))));
   }
 
   get tree() { return this.app.store.tree; }

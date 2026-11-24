@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — 2026-11-23
+
+### Added
+- **Getting started checklist** on Home for first-time setup (Home Screen install, Face ID passkey, your name, lettering and paper, handwriting training, Pencil moves, first scaled drawing, printer scale, backups). Steps tick themselves off; reopen it from Settings → Data.
+- **Uppercase engineering lettering** (default) or everyday handwriting, in Settings.
+- **Much stronger handwriting cleanup:** crisp straight strokes for uppercase letters, upright letters, even letter heights on one baseline, level words.
+- **Align writing to rows and grid lines** (on by default; switch in Settings).
+- **Snap while drawing:** in Dimensional mode the clean shape and its size show live as you draw.
+- **Type a real size into a dimension:** tap a dimension with the ↔ tool, type 3", 76.2 mm or 3'-6", and resize the shape (its other dimensions follow) or just change the label.
+- **Pens with character:** grainy graphite pencil that shades wider when the Pencil is tilted, bold felt-tip marker, crisp technical pen, flat chisel highlighter.
+- **Drag the tool strip anywhere** by its grip; double-tap the grip to put it back.
+- **Smarter, smaller handwriting training:** compact boxes, uppercase-first order, a "Words & labels" set (48 VDC, Ø6.5 THRU, SEE DWG A-101 …), and a writing profile (slant, steadiness) that tunes cleanup.
+
+### Changed
+- Settings moved from the top bar to the bottom of the left menu.
+- Choosing the lasso (or eraser / dimension) no longer leaves a pen highlighted.
+
 ## 0.3.2 — 2026-11-23
 
 ### Changed

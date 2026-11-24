@@ -7,12 +7,18 @@
 export const UNITS_PER_INCH = 96;
 export const UNITS_PER_MM = 96 / 25.4;
 
+// Each pen leaves its own kind of mark:
+//  fine-liner — smooth ink that swells a little with pressure
+//  technical pen — crisp, perfectly even line
+//  pencil — grainy graphite, lighter, shades wider when the Pencil is tilted
+//  red-line / marker — bold, slightly translucent felt-tip
+//  highlighter — flat chisel tip, see-through, always under the ink
 export const TOOLS = {
-  fineliner:   { label: 'Fine-liner',   thinning: 0.45, opacity: 1,    minWidth: 0.25 },
-  tech:        { label: 'Technical pen', thinning: 0,    opacity: 1,    minWidth: 0.25 },
-  pencil:      { label: 'Pencil',       thinning: 0.6,  opacity: 0.82, minWidth: 0.25 },
-  redline:     { label: 'Red-line pen', thinning: 0.2,  opacity: 1,    minWidth: 0.25 },
-  highlighter: { label: 'Highlighter',  thinning: 0,    opacity: 0.32, minWidth: 2, under: true },
+  fineliner:   { label: 'Fine-liner',     thinning: 0.45, opacity: 1,    minWidth: 0.25 },
+  tech:        { label: 'Technical pen',  thinning: 0,    opacity: 1,    minWidth: 0.25 },
+  pencil:      { label: 'Pencil',         thinning: 0.7,  opacity: 0.9,  minWidth: 0.25, grain: true, tilt: true },
+  redline:     { label: 'Marker / red-line', thinning: 0.15, opacity: 0.92, minWidth: 0.25, bold: 1.6 },
+  highlighter: { label: 'Highlighter',    thinning: 0,    opacity: 0.32, minWidth: 2, under: true, chisel: true },
 };
 
 export const LINE_WEIGHTS_MM = [0.25, 0.35, 0.5, 0.7, 1.0];
@@ -27,14 +33,17 @@ export const PALETTE = [
   { name: 'Gray', color: '#9ca3af' },
 ];
 
-// Stroke radius at a point, in page units.
-export function radiusAt(stroke, p) {
+// Stroke radius at a point [x, y, pressure, time, altitude], in page units.
+export function radiusAt(stroke, pt) {
   const tool = TOOLS[stroke.tool] || TOOLS.fineliner;
-  const base = (stroke.width || 0.5) * UNITS_PER_MM / 2;
+  const base = (stroke.width || 0.5) * UNITS_PER_MM / 2 * (tool.bold || 1);
+  const p = pt?.[2];
   const pressure = p == null ? 0.5 : Math.min(1, Math.max(0.05, p));
-  if (!tool.thinning) return base;
-  // pressure 0.5 => nominal width; harder => up to ~1.4x, lighter => thinner
-  return Math.max(base * 0.25, base * (1 + tool.thinning * (pressure - 0.5) * 1.6));
+  let r = tool.thinning ? Math.max(base * 0.25, base * (1 + tool.thinning * (pressure - 0.5) * 1.6)) : base;
+  // pencil held on its side shades wider (altitude in radians; π/2 = upright)
+  const alt = pt?.[4];
+  if (tool.tilt && alt != null && alt < 0.95) r *= 1 + (0.95 - alt) * 3.2;
+  return r;
 }
 
 export function strokePoints(stroke, showOriginal = false) {
@@ -46,7 +55,7 @@ export function traceStroke(sink, stroke, showOriginal = false) {
   const pts = strokePoints(stroke, showOriginal);
   const n = pts.length;
   if (!n) return;
-  const rs = pts.map((p) => radiusAt(stroke, p[2]));
+  const rs = pts.map((p) => radiusAt(stroke, p));
   for (let i = 0; i < n; i++) {
     const [x, y] = pts[i], r = rs[i];
     sink.moveTo(x + r, y);
@@ -98,23 +107,53 @@ export function strokePath(stroke, showOriginal = false) {
   return entry[key];
 }
 
-export function drawStroke(ctx, stroke, { tone = 'paper', showOriginal = false } = {}) {
+// graphite grain: a small speckled tile in the pencil's colour, cached per colour
+const grainCache = new Map();
+function grainPattern(ctx, color) {
+  let pat = grainCache.get(color);
+  if (pat) return pat;
+  const c = document.createElement('canvas');
+  c.width = c.height = 48;
+  const g = c.getContext('2d');
+  g.fillStyle = color; g.globalAlpha = 0.5; g.fillRect(0, 0, 48, 48);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 900; i++) { g.globalAlpha = 0.25 + rnd() * 0.75; g.fillRect(rnd() * 48, rnd() * 48, 0.6 + rnd() * 0.9, 0.6 + rnd() * 0.9); }
+  pat = ctx.createPattern(c, 'repeat');
+  pat.setTransform?.(new DOMMatrix().scale(0.5));
+  grainCache.set(color, pat);
+  return pat;
+}
+
+function chiselPath(sink, stroke, extra) {
+  const pts = extra ? stroke.pts.concat(extra) : stroke.pts;
+  pts.forEach((p, i) => (i ? sink.lineTo(p[0], p[1]) : sink.moveTo(p[0], p[1])));
+}
+
+function fillStroke(ctx, stroke, path, tone, extra) {
   const tool = TOOLS[stroke.tool] || TOOLS.fineliner;
+  const color = displayColor(stroke.color, tone);
   ctx.globalAlpha = stroke.opacity ?? tool.opacity;
-  ctx.fillStyle = displayColor(stroke.color, tone);
-  ctx.fill(strokePath(stroke, showOriginal), 'nonzero');
+  if (tool.chisel) {
+    const p = new Path2D(); chiselPath(p, stroke, extra);
+    ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = (stroke.width || 5) * UNITS_PER_MM; ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
+    ctx.stroke(p); ctx.restore();
+  } else {
+    ctx.fillStyle = tool.grain ? grainPattern(ctx, color) : color;
+    ctx.fill(path, 'nonzero');
+  }
   ctx.globalAlpha = 1;
+}
+
+export function drawStroke(ctx, stroke, { tone = 'paper', showOriginal = false } = {}) {
+  fillStroke(ctx, stroke, strokePath(stroke, showOriginal), tone);
 }
 
 // Draw a stroke that is still being written (no caching).
 export function drawLiveStroke(ctx, stroke, tone, extraPts) {
-  const tool = TOOLS[stroke.tool] || TOOLS.fineliner;
   const p = new Path2D();
   traceStroke(p, extraPts && extraPts.length ? { ...stroke, pts: stroke.pts.concat(extraPts) } : stroke);
-  ctx.globalAlpha = stroke.opacity ?? tool.opacity;
-  ctx.fillStyle = displayColor(stroke.color, tone);
-  ctx.fill(p, 'nonzero');
-  ctx.globalAlpha = 1;
+  fillStroke(ctx, stroke, p, tone, extraPts && extraPts.length ? extraPts : null);
 }
 
 export function strokeBounds(stroke) {
@@ -123,7 +162,7 @@ export function strokeBounds(stroke) {
   for (const p of stroke.pts) {
     if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
     if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
-    const r = radiusAt(stroke, p[2]); if (r > maxR) maxR = r;
+    const r = radiusAt(stroke, p); if (r > maxR) maxR = r;
   }
   const b = { minX: minX - maxR, minY: minY - maxR, maxX: maxX + maxR, maxY: maxY + maxR };
   Object.defineProperty(stroke, '_b', { value: b, enumerable: false, configurable: true, writable: true });
@@ -147,9 +186,9 @@ export function hitStroke(stroke, x, y, radius) {
   const b = strokeBounds(stroke);
   if (x < b.minX - radius || x > b.maxX + radius || y < b.minY - radius || y > b.maxY + radius) return false;
   const pts = stroke.pts;
-  if (pts.length === 1) return Math.hypot(pts[0][0] - x, pts[0][1] - y) <= radius + radiusAt(stroke, pts[0][2]);
+  if (pts.length === 1) return Math.hypot(pts[0][0] - x, pts[0][1] - y) <= radius + radiusAt(stroke, pts[0]);
   for (let i = 1; i < pts.length; i++) {
-    const r = radiusAt(stroke, pts[i][2]);
+    const r = radiusAt(stroke, pts[i]);
     if (distToSegment(x, y, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) <= radius + r) return true;
   }
   return false;
@@ -170,6 +209,10 @@ const f = (n) => (Math.round(n * 100) / 100).toString();
 
 export function strokeToSvg(stroke, tone = 'paper') {
   const tool = TOOLS[stroke.tool] || TOOLS.fineliner;
+  if (tool.chisel) {
+    const d = stroke.pts.map((q, i) => `${i ? 'L' : 'M'}${f(q[0])} ${f(q[1])}`).join('');
+    return `<path d="${d}" fill="none" stroke="${displayColor(stroke.color, tone)}" stroke-opacity="${stroke.opacity ?? tool.opacity}" stroke-width="${f((stroke.width || 5) * UNITS_PER_MM)}" stroke-linecap="butt" stroke-linejoin="round"/>`;
+  }
   const p = new SvgPath();
   traceStroke(p, stroke);
   return `<path d="${p}" fill="${displayColor(stroke.color, tone)}" fill-opacity="${stroke.opacity ?? tool.opacity}" fill-rule="nonzero"/>`;
