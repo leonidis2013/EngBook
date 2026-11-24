@@ -9,7 +9,7 @@ A self-hosted engineering notebook. Built for iPad Pro with Apple Pencil, and it
 - Saves every stroke automatically, works offline, and syncs live between devices.
 - Sign in with a passkey (Face ID) or a password plus an authenticator code.
 
-Version **0.4.2** · © 2026 Jerod Ulicki
+Version **0.5.0** · © 2026 Jerod Ulicki
 
 ---
 
@@ -142,7 +142,7 @@ There are five pen presets: fine-liner, technical pen (fixed width), pencil, red
 
 Open it from **Home** or **Settings → Preferences**.
 
-1. **Guided session:** write each character three times (lowercase, uppercase, digits, engineering symbols).
+1. **Training:** write short sentences and engineering problems on a ruled strip. EngBook finds each letter, measures slant, heights, baseline and spacing, shows the cleaned-up line, and picks the next line to cover what it knows least.
 2. **My letters:** your most typical version of each character with a consistency score.
 3. **Practice:** your least consistent characters, with your own best version as a faint guide to trace; scores of 70+ are saved as new samples.
 

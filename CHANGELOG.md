@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-11-24
+
+### Changed — handwriting training rebuilt as a guided, adaptive session
+- **Training** (first tab): write short sentences, labels and engineering problems (e.g. `P = V × I = 120 V × 2.5 A = 300 W`, `DRILL Ø6.5 THRU, 4 PLCS`) on one ruled strip instead of box-by-box characters.
+- EngBook finds every letter in your line, saves them as samples, and shows **You wrote** vs **After cleanup** side by side.
+- Each line is measured — **slant, height variation, baseline drift, spacing variation** — with one or two targeted tips.
+- **Adaptive:** the next line is chosen to cover the characters EngBook has the fewest or least consistent samples of. A **Profile trained** meter shows progress (≈ 8–12 lines for a full profile).
+- Your profile (slant, steadiness) feeds the handwriting cleanup. **My writing** shows it, plus every character and your recent lines; **Practice** drills your weakest characters; **Single characters** is still there for filling gaps.
+
 ## 0.4.2 — 2026-11-24
 
 ### Fixed
