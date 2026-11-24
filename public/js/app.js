@@ -12,6 +12,15 @@ import { styleEditor } from './page-settings.js';
 import { exportSvg, exportPng, printPages } from './export.js';
 import { styleOf } from './backgrounds.js';
 
+const BOOT_AT = performance.now();
+/** Fade out the loading screen. Shown at least ~0.9 s on a cold start so it doesn't just flash. */
+function hideLoader() {
+  const el = document.getElementById('loader');
+  if (!el || el.classList.contains('done')) return;
+  const wait = Math.max(0, 900 - (performance.now() - BOOT_AT));
+  setTimeout(() => { el.classList.add('done'); setTimeout(() => el.remove(), 400); }, wait);
+}
+
 class App {
   constructor() {
     this.root = $('#root');
@@ -38,18 +47,20 @@ class App {
     catch (e) {
       // offline: open from the device cache if we've signed in here before
       if (e.status === 0 && localStorage.getItem('eb.signedIn')) return this.start({ offline: true });
+      hideLoader();
       this.root.replaceChildren(h('div', { class: 'auth-screen' }, h('div', { class: 'auth-card' }, h('h1', {}, 'Can\'t reach EngBook'), h('p', { class: 'muted' }, e.message),
         h('button', { class: 'btn primary', onclick: () => location.reload() }, 'Try again'))));
       return;
     }
     this.version = state.version;
-    if (state.setup) return renderSetup(this.root, () => location.reload());
-    if (!state.authenticated) { localStorage.removeItem('eb.signedIn'); return renderLogin(this.root, state, () => location.reload()); }
+    if (state.setup) { hideLoader(); return renderSetup(this.root, () => location.reload()); }
+    if (!state.authenticated) { localStorage.removeItem('eb.signedIn'); hideLoader(); return renderLogin(this.root, state, () => location.reload()); }
     localStorage.setItem('eb.signedIn', '1');
     this.start({});
   }
 
   async start({ offline }) {
+    if (!this.version) this.version = (document.querySelector('#loader .ver')?.textContent || '').replace(/^v/, '').replace('{{VERSION}}', '');
     await this.store.init();
     this.buildLayout();
     this.store.addEventListener('status', (e) => this.showStatus(e.detail));
@@ -67,8 +78,9 @@ class App {
       if (!this.store.tree.notebooks.length) await this.firstRun();
     }
     const last = localStorage.getItem('eb.lastPage');
-    if (last && this.store.tree.pages.some((p) => p.id === last)) this.openPage(last);
+    if (last && this.store.tree.pages.some((p) => p.id === last)) await this.openPage(last);
     else this.showHome();
+    hideLoader();
     const low = sessionStorage.getItem('eb.lowRecovery');
     if (low) { sessionStorage.removeItem('eb.lowRecovery'); toast(`Only ${low} recovery code${low === '1' ? '' : 's'} left. Make new ones in Settings.`, 'warn', 7000); }
   }
@@ -93,7 +105,7 @@ class App {
     this.pageMenuBtn = h('button', { class: 'icon-btn', 'aria-label': 'Page menu', onclick: (e) => this.openPageMenu(e.currentTarget) }, icon('more'));
     const top = h('header', { class: 'topbar' },
       h('button', { class: 'icon-btn', 'aria-label': 'Library', onclick: () => this.toggleSidebar() }, icon('menu')),
-      h('button', { class: 'brand-btn', onclick: () => this.showHome(), 'aria-label': 'Home' }, h('span', { class: 'brand-mark', html: logoSvg() }), h('span', { class: 'brand-name' }, 'EngBook')),
+      h('button', { class: 'brand-btn', onclick: () => this.showHome(), 'aria-label': 'Home' }, h('span', { class: 'brand-mark', html: logoSvg() }), h('span', { class: 'brand-name' }, 'EngBook'), h('span', { class: 'brand-ver mono' }, this.version ? `v${this.version}` : '')),
       this.crumb, h('div', { class: 'grow' }), this.syncEl,
       h('div', { class: 'tb-group' }, this.undoBtn, this.redoBtn, this.styleBtn, this.pageMenuBtn),
       h('button', { class: 'icon-btn', 'aria-label': 'Settings', onclick: () => openSettings(this) }, icon('gear')));

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-11-23
+
+### Added
+- Loading screen: a bracket drafts itself on a blueprint grid (outline traced by a pencil, then holes, centerlines, dimensions and a title block). Pure SVG and CSS inside the page, so there's no extra download or script, and it respects Reduce Motion.
+- Version number next to the EngBook logo in the top bar (also shown on phones) and on the loading screen.
+
 ## 0.2.0 — 2026-11-23
 
 ### Added

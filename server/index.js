@@ -133,6 +133,11 @@ function serveStatic(req, res, urlPath) {
     if (err || !st.isFile()) return send(res, 404, 'Not found');
     const etag = `"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}-${VERSION}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag }); return res.end(); }
+    if (rel === '/index.html') { // fill in the version shown on the loading screen
+      const html = fs.readFileSync(file, 'utf8').replaceAll('{{VERSION}}', VERSION);
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache', ETag: etag });
+      return res.end(html);
+    }
     res.writeHead(200, {
       ...SECURITY_HEADERS,
       'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
