@@ -2,7 +2,7 @@
 // Network first (so updates arrive right away), cache as the fallback.
 // Notes themselves are stored by the app in IndexedDB, not here.
 // Copyright (c) 2026 Jerod Ulicki
-const CACHE = 'engbook-shell-v7';
+const CACHE = 'engbook-shell-v8';
 const SHELL = [
   '/', '/index.html', '/css/app.css', '/manifest.webmanifest', '/icons/icon.svg',
   '/js/app.js', '/js/api.js', '/js/store.js', '/js/editor.js', '/js/ink.js', '/js/backgrounds.js',

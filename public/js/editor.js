@@ -90,8 +90,8 @@ export class Editor {
     const W = this.W || 800, H = this.H || 600;
     const size = pageSize(this.style);
     if (size) {
-      const m = W < 700 ? 12 : 40;
-      const ins = this.insets();
+      const m = 16; // edge to edge, with a hair of margin so the page edge shows
+      const ins = { left: 0, right: 0 }; // fit uses the whole screen; the tool strip floats over it
       const avail = W - ins.left - ins.right;
       const z = Math.max(MIN_Z, Math.min(MAX_Z, (avail - m) / size.w));
       this.view = { z, ox: -(ins.left + (avail - size.w * z) / 2) / z, oy: -(m / 2) / z };
@@ -124,32 +124,42 @@ export class Editor {
   }
 
   bindStripDrag(grip) {
+    // drag from the grip or any empty part of the strip, with finger, mouse or Apple Pencil
     let start = null, lastTap = 0;
-    grip.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      grip.setPointerCapture(e.pointerId);
-      const r = this.strip.getBoundingClientRect(), host = this.host.getBoundingClientRect();
-      start = { x: e.clientX, y: e.clientY, left: r.left - host.left, top: r.top - host.top, moved: false };
-    });
-    grip.addEventListener('pointermove', (e) => {
-      if (!start) return;
+    const move = (e) => {
+      if (!start || e.pointerId !== start.id) return;
       const dx = e.clientX - start.x, dy = e.clientY - start.y;
       if (!start.moved && Math.hypot(dx, dy) < 4) return;
       start.moved = true;
       this.prefs.set('stripPos', { x: (start.left + dx) / this.W, y: (start.top + dy) / this.H });
       this.placeStrip();
-    });
-    const end = () => {
-      if (!start) return;
-      if (!start.moved) {
+      e.preventDefault();
+    };
+    const end = (e) => {
+      if (!start || (e && e.pointerId !== start.id)) return;
+      if (!start.moved && start.onGrip) {
         const t = performance.now();
         if (t - lastTap < 350) { this.prefs.set('stripPos', null); this.placeStrip(); }
         lastTap = t;
       }
       start = null;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', end, true);
+      window.removeEventListener('pointercancel', end, true);
     };
-    grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+    this.strip.addEventListener('pointerdown', (e) => {
+      const onGrip = grip.contains(e.target);
+      if (!onGrip && e.target !== this.strip && !e.target.classList?.contains('ts-sep')) return; // buttons keep working
+      e.preventDefault(); e.stopPropagation();
+      try { this.strip.setPointerCapture(e.pointerId); } catch {}
+      const r = this.strip.getBoundingClientRect(), host = this.host.getBoundingClientRect();
+      start = { id: e.pointerId, x: e.clientX, y: e.clientY, left: r.left - host.left, top: r.top - host.top, moved: false, onGrip };
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', end, true);
+      window.addEventListener('pointercancel', end, true);
+    });
   }
+
 
   // ------------------------------------------------------------------ sizing + rendering
   resize() {
@@ -419,8 +429,9 @@ export class Editor {
     if (e.pointerType !== 'touch') return;
     // ---- palm rejection ----
     if (this.drawPointer != null && this.drawType === 'pen') { this.ignored.add(e.pointerId); return; }
-    if (this.pencilSeen && (e.width > 36 || e.height > 36)) { this.ignored.add(e.pointerId); return; }
-    if (performance.now() - this.lastPenUp < 220) { this.ignored.add(e.pointerId); return; }
+    // a palm is a big contact patch; fingertips on iPad can report 40–60 px, so only reject really large ones
+    if (this.pencilSeen && this.touches.size === 0 && (e.width > 90 || e.height > 90)) { this.ignored.add(e.pointerId); return; }
+    if (performance.now() - this.lastPenUp < 120 && this.touches.size === 0) { this.ignored.add(e.pointerId); return; }
 
     // a second finger while finger-drawing turns the stroke into a pan/zoom
     if (this.drawPointer != null && this.drawType === 'touch') {
@@ -520,7 +531,7 @@ export class Editor {
   // Double-tap: zoom in to 2.5x at that spot, or back to fit.
   doubleTapZoom(x, y) {
     const size = pageSize(this.style);
-    const fitZ = size ? (this.W - (this.W < 700 ? 12 : 40)) / size.w : 1.25;
+    const fitZ = size ? (this.W - 16) / size.w : 1.25;
     if (this.view.z > fitZ * 1.3) { this.fit(); return; }
     this.zoomAt(x, y, Math.max(fitZ * 2.5, 1.5));
     this.clampView(); this.saveViewSoon();
@@ -642,7 +653,7 @@ export class Editor {
     this._pvT = now;
     const c = this.cur;
     const b = strokeBounds({ ...c, _b: undefined, pts: c.pts });
-    if (Math.max(b.maxX - b.minX, b.maxY - b.minY) < 22) { this.preview = null; this.liveLabel = null; return; }
+    if (Math.max(b.maxX - b.minX, b.maxY - b.minY) * this.view.z < 70) { this.preview = null; this.liveLabel = null; return; }
     const sh = recognize(c.pts);
     if (!sh) { this.preview = null; this.liveLabel = null; return; }
     const opts = this.snapOpts(); const sn = this.snap;
@@ -707,7 +718,7 @@ export class Editor {
   /** Dimensional mode: a finished stroke becomes a clean, snapped shape (small strokes like letters stay as written). */
   autoSnap(s) {
     const b = strokeBounds(s);
-    if (Math.max(b.maxX - b.minX, b.maxY - b.minY) < 22) return;
+    if (Math.max(b.maxX - b.minX, b.maxY - b.minY) * this.view.z < 70) return; // letter-sized on screen: keep as handwriting
     const sh = recognize(s.pts);
     if (!sh) return;
     const opts = this.snapOpts();

@@ -363,3 +363,13 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .profile-card > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .profile-card b { font-size: 18px; }
 .word-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+
+/* v0.4.1: collapsed strip is see-through; bigger grip that's easy to grab with the Pencil */
+.thumbstrip.collapsed { background: transparent; border-color: transparent; box-shadow: none; }
+.thumbstrip.collapsed .ts-btn { background: color-mix(in srgb, var(--panel) 55%, transparent); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line-2) 60%, transparent); margin-bottom: 4px; }
+.thumbstrip.collapsed .ts-btn.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.thumbstrip.collapsed .ts-grip { opacity: .7; }
+.ts-grip { padding: 8px 0 8px; min-height: 26px; align-items: center; border-radius: 8px; }
+.ts-grip:hover, .ts-grip:active { background: var(--hover); }
+.ts-grip i { width: 5px; height: 5px; }
+@media (min-width: 641px) { .thumbstrip { touch-action: none; overflow: visible; max-height: none; } }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 — 2026-11-24
+
+### Fixed
+- Pinch-to-zoom stopped working after using the Pencil (iPad fingertips were mistaken for palms). Only real palm-sized contacts are ignored now.
+- The tool strip can be dragged with the Apple Pencil (and from any empty part of the strip, not just the grip).
+- Dimensional mode no longer turns letters into shapes: only strokes bigger than a letter on screen are snapped.
+
+### Changed
+- Fit page to screen uses the whole width; the tool strip floats over the page.
+- The collapsed tool strip is see-through.
+
 ## 0.4.0 — 2026-11-23
 
 ### Added
